@@ -136,5 +136,107 @@ module LegacyAPI
                    id: api_params["id"]
     end
 
+    def list
+      where = {}
+      if api_params["to"].present?
+        where[:rcpt_to] = api_params["to"]
+      end
+      if api_params["from"].present?
+        where[:mail_from] = api_params["from"]
+      end
+      ts = {}
+      if api_params["before"].present?
+        if api_params["before"] =~ /\A\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?\z/
+          ts[:less_than] = Time.zone.parse(api_params["before"]).to_f
+        else
+          render_parameter_error "`before` must be in 'yyyy-mm-dd hh:mm' or 'yyyy-mm-dd' format"
+          return
+        end
+      end
+      if api_params["after"].present?
+        if api_params["after"] =~ /\A\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?\z/
+          ts[:greater_than] = Time.zone.parse(api_params["after"]).to_f
+        else
+          render_parameter_error "`after` must be in 'yyyy-mm-dd hh:mm' or 'yyyy-mm-dd' format"
+          return
+        end
+      end
+      where[:timestamp] = ts if ts.present?
+      options = { where: where, order: :timestamp, direction: "desc" }
+      messages = @current_credential.server.message_db.messages(options)
+
+      expansions = api_params["_expansions"]
+      if expansions
+        data = messages.map do |message|
+          h = { id: message.id, token: message.token }
+          if expansions == true || (expansions.is_a?(Array) && expansions.include?("status"))
+            h[:status] = {
+              status: message.status,
+              last_delivery_attempt: message.last_delivery_attempt&.to_f,
+              held: message.held,
+              hold_expiry: message.hold_expiry&.to_f
+            }
+          end
+          if expansions == true || (expansions.is_a?(Array) && expansions.include?("details"))
+            h[:details] = {
+              rcpt_to: message.rcpt_to,
+              mail_from: message.mail_from,
+              subject: message.subject,
+              message_id: message.message_id,
+              timestamp: message.timestamp.to_f,
+              direction: message.scope,
+              size: message.size,
+              bounce: message.bounce,
+              bounce_for_id: message.bounce_for_id,
+              tag: message.tag,
+              received_with_ssl: message.received_with_ssl
+            }
+          end
+          if expansions == true || (expansions.is_a?(Array) && expansions.include?("inspection"))
+            h[:inspection] = {
+              inspected: message.inspected,
+              spam: message.spam,
+              spam_score: message.spam_score.to_f,
+              threat: message.threat,
+              threat_details: message.threat_details
+            }
+          end
+          if expansions == true || (expansions.is_a?(Array) && expansions.include?("plain_body"))
+            h[:plain_body] = message.plain_body
+          end
+          if expansions == true || (expansions.is_a?(Array) && expansions.include?("html_body"))
+            h[:html_body] = message.html_body
+          end
+          if expansions == true || (expansions.is_a?(Array) && expansions.include?("attachments"))
+            h[:attachments] = message.attachments.map do |attachment|
+              {
+                filename: attachment.filename.to_s,
+                content_type: attachment.mime_type,
+                data: Base64.encode64(attachment.body.to_s),
+                size: attachment.body.to_s.bytesize,
+                hash: Digest::SHA1.hexdigest(attachment.body.to_s)
+              }
+            end
+          end
+          if expansions == true || (expansions.is_a?(Array) && expansions.include?("headers"))
+            h[:headers] = message.headers
+          end
+          if expansions == true || (expansions.is_a?(Array) && expansions.include?("raw_message"))
+            h[:raw_message] = Base64.encode64(message.raw_message)
+          end
+          if expansions == true || (expansions.is_a?(Array) && expansions.include?("activity_entries"))
+            h[:activity_entries] = {
+              loads: message.loads,
+              clicks: message.clicks
+            }
+          end
+          h
+        end
+        render_success data
+      else
+        render_success messages.map(&:id)
+      end
+    end
+
   end
 end
