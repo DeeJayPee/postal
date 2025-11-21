@@ -51,6 +51,10 @@ class WebhookDeliveryService
       @webhook_request.retry_after = RETRIES[@webhook_request.attempts]&.from_now
     end
 
+    # Truncate body to fit in TEXT column (max 65,535 bytes)
+    # Keep it under 65,000 to be safe with multi-byte characters
+    truncated_body = @http_result[:body]&.byteslice(0, 65_000)
+
     @attempt = @webhook_request.server.message_db.webhooks.record(
       event: @webhook_request.event,
       url: @webhook_request.url,
@@ -60,7 +64,7 @@ class WebhookDeliveryService
       payload: @webhook_request.payload.to_json,
       uuid: @webhook_request.uuid,
       status_code: @http_result[:code],
-      body: @http_result[:body],
+      body: truncated_body,
       will_retry: @webhook_request.retry_after.present?
     )
   end
