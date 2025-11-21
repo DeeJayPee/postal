@@ -135,7 +135,10 @@ module MessageDequeuer
       @result = @state.send_result
       return if @result
 
-      sender = @state.sender_for(SMTPSender,
+      # Use rollup-aware sender if virtual queue is configured
+      sender_class = queued_message.virtual_queue.present? ? SMTPSenderWithRollup : SMTPSender
+
+      sender = @state.sender_for(sender_class,
                                  queued_message.message.recipient_domain,
                                  queued_message.ip_address)
 

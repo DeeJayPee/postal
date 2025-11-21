@@ -1,0 +1,96 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "fileutils"
+
+puts "=" * 60
+puts "SMTP Rollup Setup for Postal"
+puts "=" * 60
+puts ""
+
+# Check if we're in the right directory
+unless File.exist?("config/application.rb")
+  puts "Error: This script must be run from the Postal root directory"
+  exit 1
+end
+
+# Create config directory if it doesn't exist
+FileUtils.mkdir_p("config")
+
+# Copy example configuration files
+examples_dir = "config/examples"
+config_files = {
+  "mx_rollups.conf" => "MX Rollup Configuration",
+  "domain_macros.conf" => "Domain Macro Configuration",
+  "queue_configs.conf" => "Queue Configuration"
+}
+
+puts "Step 1: Copying example configuration files..."
+puts ""
+
+config_files.each do |filename, description|
+  source = File.join(examples_dir, filename)
+  dest = File.join("config", filename)
+
+  if File.exist?(dest)
+    print "  #{filename} already exists. Overwrite? (y/N): "
+    response = gets.chomp.downcase
+    next unless response == "y"
+  end
+
+  if File.exist?(source)
+    FileUtils.cp(source, dest)
+    puts "  ✓ Copied #{filename}"
+  else
+    puts "  ✗ Warning: #{source} not found"
+  end
+end
+
+puts ""
+puts "Step 2: Running database migrations..."
+puts ""
+
+system("bundle exec rails db:migrate")
+
+puts ""
+puts "Step 3: Would you like to import the example configurations? (y/N): "
+response = gets.chomp.downcase
+
+if response == "y"
+  puts ""
+  puts "Importing configurations..."
+  puts ""
+
+  system("bundle exec rake postal:smtp_rollup:import_all")
+
+  puts ""
+  puts "✓ Configuration import complete!"
+else
+  puts ""
+  puts "Skipping import. You can import later with:"
+  puts "  bundle exec rake postal:smtp_rollup:import_all"
+end
+
+puts ""
+puts "=" * 60
+puts "Setup Complete!"
+puts "=" * 60
+puts ""
+puts "Next steps:"
+puts ""
+puts "1. Review and customize the configuration files in config/:"
+puts "   - config/mx_rollups.conf"
+puts "   - config/domain_macros.conf"
+puts "   - config/queue_configs.conf"
+puts ""
+puts "2. Import your custom configurations:"
+puts "   bundle exec rake postal:smtp_rollup:import_all"
+puts ""
+puts "3. View statistics:"
+puts "   bundle exec rake postal:smtp_rollup:stats"
+puts ""
+puts "4. Read the full documentation:"
+puts "   doc/smtp_rollup_guide.md"
+puts ""
+puts "For more information, see: doc/smtp_rollup_guide.md"
+puts ""

@@ -351,12 +351,15 @@ module Postal
       # Create a new item in the message queue for this message
       #
       def add_to_message_queue(**options)
+        virtual_queue = scope == "outgoing" ? SmtpRollupService.resolve_virtual_queue(recipient_domain) : nil
+
         QueuedMessage.create!({
           message: self,
           server_id: @database.server_id,
           batch_key: batch_key,
           domain: recipient_domain,
-          route_id: route_id
+          route_id: route_id,
+          virtual_queue: virtual_queue
         }.merge(options))
       end
 
@@ -367,7 +370,9 @@ module Postal
         case scope
         when "outgoing"
           key = "outgoing-"
-          key += recipient_domain.to_s
+          # Use virtual queue name if available, otherwise use recipient domain
+          virtual_queue = SmtpRollupService.batch_key_for_domain(recipient_domain)
+          key += virtual_queue.to_s
         when "incoming"
           key = "incoming-"
           key += "rt:#{route_id}-ep:#{endpoint_id}-#{endpoint_type}"
