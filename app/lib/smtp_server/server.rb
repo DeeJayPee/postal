@@ -71,6 +71,8 @@ module SMTPServer
 
     def listen
       bind_address = ENV.fetch("BIND_ADDRESS", Postal::Config.smtp_server.default_bind_address)
+      # Override bind address to IPv4 if IPv6 is globally disabled
+      bind_address = "0.0.0.0" if Postal::Config.postal.disable_ipv6? && bind_address == "::"
       port = ENV.fetch("PORT", Postal::Config.smtp_server.default_port)
 
       @server = TCPServer.open(bind_address, port)

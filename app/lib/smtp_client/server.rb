@@ -20,8 +20,10 @@ module SMTPClient
     def endpoints
       ips = []
 
-      DNSResolver.local.aaaa(@hostname).each do |ip|
-        ips << Endpoint.new(self, ip)
+      unless Postal::Config.postal.disable_ipv6?
+        DNSResolver.local.aaaa(@hostname).each do |ip|
+          ips << Endpoint.new(self, ip)
+        end
       end
 
       DNSResolver.local.a(@hostname).each do |ip|
