@@ -84,6 +84,38 @@ class MessagesController < ApplicationController
     get_messages("held")
   end
 
+  def bulk_delete_held
+    held_messages = @server.message_db.messages(where: { held: true })
+    count = 0
+    held_messages.each do |message|
+      message.delete
+      count += 1
+    end
+    redirect_to_with_json held_organization_server_messages_path(organization, @server), notice: "Successfully deleted #{count} held message(s)."
+  end
+
+  def bulk_cancel_held
+    held_messages = @server.message_db.messages(where: { held: true })
+    count = 0
+    held_messages.each do |message|
+      message.cancel_hold
+      count += 1
+    end
+    redirect_to_with_json held_organization_server_messages_path(organization, @server), notice: "Successfully cancelled hold on #{count} message(s)."
+  end
+
+  def bulk_release_held
+    held_messages = @server.message_db.messages(where: { held: true })
+    count = 0
+    held_messages.each do |message|
+      if message.raw_message?
+        message.add_to_message_queue(manual: true)
+        count += 1
+      end
+    end
+    redirect_to_with_json held_organization_server_messages_path(organization, @server), notice: "Successfully released #{count} held message(s) for delivery."
+  end
+
   def deliveries
     render json: { html: render_to_string(partial: "deliveries", locals: { message: @message }) }
   end

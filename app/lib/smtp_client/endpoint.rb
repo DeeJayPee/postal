@@ -62,7 +62,9 @@ module SMTPClient
       end
 
       if @source_ip_address
-        @smtp_client.source_address = ipv6? ? @source_ip_address.ipv6 : @source_ip_address.ipv4
+        # Use IPv4 if IPv6 is globally disabled or if connecting to an IPv4 endpoint
+        use_ipv4 = Postal::Config.postal.disable_ipv6? || ipv4?
+        @smtp_client.source_address = use_ipv4 ? @source_ip_address.ipv4 : @source_ip_address.ipv6
       end
 
       if allow_ssl

@@ -177,8 +177,8 @@ class SMTPSender < BaseSender
   # @param endpoint [SMTPClient::Endpoint]
   # @return [Boolean]
   def connect_to_endpoint(endpoint, allow_ssl: true)
-    if @source_ip_address && @source_ip_address.ipv6.blank? && endpoint.ipv6?
-      # Don't try to use IPv6 if the IP address we're sending from doesn't support it.
+    if endpoint.ipv6? && (Postal::Config.postal.disable_ipv6? || (@source_ip_address && @source_ip_address.ipv6.blank?))
+      # Don't try to use IPv6 if it's globally disabled or if the IP address we're sending from doesn't support it.
       return false
     end
 

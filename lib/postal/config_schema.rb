@@ -106,6 +106,11 @@ module Postal
         description "When de-queuing in batches, use this limit for the batch size"
         default 100
       end
+
+      boolean :disable_ipv6 do
+        description "Disable IPv6 globally for all connections (incoming and outgoing)"
+        default false
+      end
     end
 
     group :web_server do
