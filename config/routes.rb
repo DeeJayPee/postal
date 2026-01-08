@@ -34,6 +34,9 @@ Rails.application.routes.draw do
         get :incoming, on: :collection
         get :outgoing, on: :collection
         get :held, on: :collection
+        post :bulk_delete_held, on: :collection
+        post :bulk_cancel_held, on: :collection
+        post :bulk_release_held, on: :collection
         get :activity, on: :member
         get :plain, on: :member
         get :html, on: :member

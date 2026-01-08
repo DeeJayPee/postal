@@ -12,5 +12,11 @@
         You haven't sent any messages through this mail server yet. Not to worry though
         they'll start appearing here as soon as you start sending them.
 - else
+  .pageContent
+    - unless @messages[:records].empty?
+      .bulkActions
+        %p.bulkActions__title Bulk Actions:
+        = button_to "Delete All Held", bulk_delete_held_organization_server_messages_path(organization, @server), method: :post, class: 'button button--small button--danger', data: { confirm: 'Are you sure you want to delete ALL held messages? This action cannot be undone.' }
+        = button_to "Cancel All Held", bulk_cancel_held_organization_server_messages_path(organization, @server), method: :post, class: 'button button--small button--warning', data: { confirm: 'Are you sure you want to cancel the hold on ALL held messages?' }
+        = button_to "Release All Held", bulk_release_held_organization_server_messages_path(organization, @server), method: :post, class: 'button button--small button--primary', data: { confirm: 'Are you sure you want to release ALL held messages for delivery?' }
   = render 'index'
-
