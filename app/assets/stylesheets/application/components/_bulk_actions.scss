@@ -1,0 +1,51 @@
+.bulkActions {
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 15px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bulkActions__title {
+  margin: 0;
+  font-weight: bold;
+  font-size: 14px;
+  color: #333;
+}
+
+.bulkActions form {
+  display: inline-block;
+  margin: 0;
+}
+
+.button--warning {
+  background-color: #f39c12;
+  border-bottom-color: darken(#f39c12, 15%);
+
+  &:active {
+    background-color: darken(#f39c12, 15%);
+  }
+
+  &:focus {
+    border-color: darken(#f39c12, 15%);
+    background-color: lighten(#f39c12, 5%);
+  }
+}
+
+.button--primary {
+  background-color: #3498db;
+  border-bottom-color: darken(#3498db, 15%);
+
+  &:active {
+    background-color: darken(#3498db, 15%);
+  }
+
+  &:focus {
+    border-color: darken(#3498db, 15%);
+    background-color: lighten(#3498db, 5%);
+  }
+}
