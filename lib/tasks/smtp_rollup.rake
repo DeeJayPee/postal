@@ -1,14 +1,39 @@
 # frozen_string_literal: true
 
+require "pathname"
+
 namespace :postal do
   namespace :smtp_rollup do
 
+    def resolve_rollup_config_path(explicit_path, default_filename)
+      candidates = []
+      candidates << explicit_path.to_s if explicit_path
+      candidates << File.join(rollup_config_dir, default_filename) if rollup_config_dir
+      candidates << Rails.root.join("config", default_filename).to_s
+
+      candidates.uniq!
+      candidates.find { |p| p.present? && File.exist?(p) }
+    end
+
+    def rollup_config_dir
+      base = Postal.config_file_path
+      expanded = Pathname.new(base).absolute? ? base : Rails.root.join(base).to_s
+      File.dirname(expanded)
+    rescue StandardError
+      nil
+    end
+
     desc "Import MX rollups from configuration file"
     task :import_mx_rollups, [:file_path] => :environment do |_t, args|
-      file_path = args[:file_path] || Rails.root.join("config", "mx_rollups.conf")
+      file_path = resolve_rollup_config_path(args[:file_path], "mx_rollups.conf")
 
-      unless File.exist?(file_path)
-        puts "Error: Configuration file not found at #{file_path}"
+      unless file_path
+        searched = [
+          args[:file_path],
+          (File.join(rollup_config_dir, "mx_rollups.conf") if rollup_config_dir),
+          Rails.root.join("config", "mx_rollups.conf")
+        ].compact
+        puts "Error: Configuration file not found. Looked in:\n#{searched.map { |p| "  - #{p}" }.join("\n") }"
         exit 1
       end
 
@@ -40,10 +65,15 @@ namespace :postal do
 
     desc "Import domain macros from configuration file"
     task :import_domain_macros, [:file_path] => :environment do |_t, args|
-      file_path = args[:file_path] || Rails.root.join("config", "domain_macros.conf")
+      file_path = resolve_rollup_config_path(args[:file_path], "domain_macros.conf")
 
-      unless File.exist?(file_path)
-        puts "Error: Configuration file not found at #{file_path}"
+      unless file_path
+        searched = [
+          args[:file_path],
+          (File.join(rollup_config_dir, "domain_macros.conf") if rollup_config_dir),
+          Rails.root.join("config", "domain_macros.conf")
+        ].compact
+        puts "Error: Configuration file not found. Looked in:\n#{searched.map { |p| "  - #{p}" }.join("\n") }"
         exit 1
       end
 
@@ -81,10 +111,15 @@ namespace :postal do
 
     desc "Import queue configurations from configuration file"
     task :import_queue_configs, [:file_path] => :environment do |_t, args|
-      file_path = args[:file_path] || Rails.root.join("config", "queue_configs.conf")
+      file_path = resolve_rollup_config_path(args[:file_path], "queue_configs.conf")
 
-      unless File.exist?(file_path)
-        puts "Error: Configuration file not found at #{file_path}"
+      unless file_path
+        searched = [
+          args[:file_path],
+          (File.join(rollup_config_dir, "queue_configs.conf") if rollup_config_dir),
+          Rails.root.join("config", "queue_configs.conf")
+        ].compact
+        puts "Error: Configuration file not found. Looked in:\n#{searched.map { |p| "  - #{p}" }.join("\n") }"
         exit 1
       end
 
