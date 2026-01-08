@@ -35,9 +35,9 @@ bundle exec rails db:migrate
 
 Expected output:
 ```
-== 20241121000001 CreateMxRollups: migrating ==================================
+== 20241121000001 CreateMXRollups: migrating ==================================
 -- create_table(:mx_rollups)
-== 20241121000001 CreateMxRollups: migrated (0.0234s) ========================
+== 20241121000001 CreateMXRollups: migrated (0.0234s) ========================
 
 == 20241121000002 CreateDomainMacros: migrating ===============================
 -- create_table(:domain_macros)
@@ -57,7 +57,7 @@ Expected output:
 
 ```bash
 # Check that new tables exist
-bundle exec rails runner "puts MxRollup.table_exists?"
+bundle exec rails runner "puts MXRollup.table_exists?"
 bundle exec rails runner "puts DomainMacro.table_exists?"
 bundle exec rails runner "puts QueueConfiguration.table_exists?"
 ```
@@ -237,7 +237,7 @@ bundle exec rails db:rollback STEP=4
 dig MX yourdomain.com
 
 # Check if MX hostname is in rollup table
-bundle exec rails runner "puts MxRollup.where(mx_hostname: 'your.mx.hostname').inspect"
+bundle exec rails runner "puts MXRollup.where(mx_hostname: 'your.mx.hostname').inspect"
 ```
 
 ### Issue 2: Connection Limits Not Applied

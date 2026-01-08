@@ -3,6 +3,15 @@
 # Service to handle SMTP rollup resolution for virtual domain queues
 class SMTPRollupService
 
+  def self.rollup_available?
+    return false unless defined?(DomainMacro) && defined?(MXRollup) && defined?(QueueConfiguration)
+    return false unless DomainMacro.table_exists? && MXRollup.table_exists? && QueueConfiguration.table_exists?
+
+    true
+  rescue StandardError
+    false
+  end
+
   # Resolve the virtual queue name for a given recipient domain
   # This considers both domain macros and MX rollups
   #
@@ -10,6 +19,7 @@ class SMTPRollupService
   # @return [String, nil] the virtual queue name or nil
   def self.resolve_virtual_queue(domain)
     return nil if domain.blank?
+    return nil unless rollup_available?
 
     # First check if the domain matches a domain macro
     queue_name = DomainMacro.find_queue_for_domain(domain)
@@ -24,6 +34,8 @@ class SMTPRollupService
   # @param domain [String] the recipient domain
   # @return [String, nil] the rollup queue name or nil
   def self.resolve_queue_from_mx_rollup(domain)
+    return nil unless rollup_available?
+
     mx_records = DNSResolver.local.mx(domain, raise_timeout_errors: false)
     return nil if mx_records.empty?
 

@@ -22,7 +22,7 @@ namespace :postal do
           mx_hostname = ::Regexp.last_match(1)
           rollup_name = ::Regexp.last_match(2)
 
-          rollup = MxRollup.find_or_initialize_by(mx_hostname: mx_hostname)
+          rollup = MXRollup.find_or_initialize_by(mx_hostname: mx_hostname)
           rollup.rollup_name = rollup_name
           rollup.enabled = true
 
@@ -149,7 +149,7 @@ namespace :postal do
         f.puts "# Format: mx <mx_hostname> <rollup_name>"
         f.puts ""
 
-        MxRollup.enabled.order(:rollup_name, :mx_hostname).each do |rollup|
+        MXRollup.enabled.order(:rollup_name, :mx_hostname).each do |rollup|
           f.puts "mx #{rollup.mx_hostname} #{rollup.rollup_name}"
         end
       end
@@ -189,13 +189,13 @@ namespace :postal do
     task stats: :environment do
       puts "=== SMTP Rollup Statistics ==="
       puts ""
-      puts "MX Rollups: #{MxRollup.enabled.count}"
+      puts "MX Rollups: #{MXRollup.enabled.count}"
       puts "Domain Macros: #{DomainMacro.enabled.count}"
       puts "Queue Configurations: #{QueueConfiguration.enabled.count}"
       puts ""
 
       puts "=== Rollup Groups ==="
-      MxRollup.enabled.group(:rollup_name).count.each do |rollup_name, count|
+      MXRollup.enabled.group(:rollup_name).count.each do |rollup_name, count|
         puts "  #{rollup_name}: #{count} MX record(s)"
       end
     end

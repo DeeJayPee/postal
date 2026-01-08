@@ -203,7 +203,7 @@ bundle exec rake postal:smtp_rollup:stats
 
 ```ruby
 # Create MX rollup
-MxRollup.create!(
+MXRollup.create!(
   mx_hostname: 'mx.example.com',
   rollup_name: 'example.rollup'
 )
@@ -224,7 +224,7 @@ QueueConfiguration.create!(
 )
 
 # Resolve virtual queue
-queue = SmtpRollupService.resolve_virtual_queue('example.com')
+queue = SMTPRollupService.resolve_virtual_queue('example.com')
 ```
 
 ## Monitoring

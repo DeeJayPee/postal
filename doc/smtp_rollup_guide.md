@@ -307,13 +307,13 @@ SELECT * FROM queue_configurations WHERE enabled = 1;
 4. **Regular Updates**: Keep MX rollup lists updated as ISPs change infrastructure
 5. **Test First**: Test with a small volume before applying to production traffic
 
-## API Integration
+## API Usage
 
-The rollup system can be managed programmatically:
+### Programmatic Management
 
 ```ruby
 # Create MX rollup
-MxRollup.create!(
+MXRollup.create!(
   mx_hostname: 'mx.example.com',
   rollup_name: 'example.rollup',
   enabled: true
@@ -337,7 +337,7 @@ QueueConfiguration.create!(
 )
 
 # Resolve virtual queue for a domain
-queue = SmtpRollupService.resolve_virtual_queue('example.com')
+queue = SMTPRollupService.resolve_virtual_queue('example.com')
 ```
 
 ## Migration from PowerMTA

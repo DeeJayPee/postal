@@ -353,15 +353,19 @@ module Postal
       def add_to_message_queue(**options)
         virtual_queue = scope == "outgoing" ? SMTPRollupService.resolve_virtual_queue(recipient_domain) : nil
 
-        QueuedMessage.create!({
+        attrs = {
           message: self,
-          message_db_message: self,
           server_id: @database.server_id,
           batch_key: batch_key,
           domain: recipient_domain,
-          route_id: route_id,
-          virtual_queue: virtual_queue
-        }.merge(options))
+          route_id: route_id
+        }
+
+        if QueuedMessage.column_names.include?("virtual_queue")
+          attrs[:virtual_queue] = virtual_queue
+        end
+
+        QueuedMessage.create!(attrs.merge(options))
       end
 
       #
