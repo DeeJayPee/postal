@@ -13,7 +13,7 @@
 #  updated_at  :datetime         not null
 #
 
-class MxRollup < ApplicationRecord
+class MXRollup < ApplicationRecord
   validates :mx_hostname, presence: true
   validates :rollup_name, presence: true
 

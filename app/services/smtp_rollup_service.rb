@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Service to handle SMTP rollup resolution for virtual domain queues
-class SmtpRollupService
+class SMTPRollupService
 
   # Resolve the virtual queue name for a given recipient domain
   # This considers both domain macros and MX rollups
@@ -29,7 +29,7 @@ class SmtpRollupService
 
     # Check each MX record to see if it matches a rollup
     mx_records.each do |_priority, hostname|
-      rollup_name = MxRollup.find_rollup_for_mx(hostname)
+      rollup_name = MXRollup.find_rollup_for_mx(hostname)
       return rollup_name if rollup_name.present?
     end
 

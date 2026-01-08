@@ -10,8 +10,8 @@ class SMTPSenderWithRollup < SMTPSender
     super(domain, source_ip_address, servers: servers, log_id: log_id, rcpt_to: rcpt_to)
 
     # Resolve virtual queue configuration
-    @virtual_queue_name = SmtpRollupService.resolve_virtual_queue(domain)
-    @queue_config = SmtpRollupService.queue_configuration_for_domain(domain) if @virtual_queue_name
+    @virtual_queue_name = SMTPRollupService.resolve_virtual_queue(domain)
+    @queue_config = SMTPRollupService.queue_configuration_for_domain(domain) if @virtual_queue_name
 
     if @virtual_queue_name
       logger.info "Using virtual queue '#{@virtual_queue_name}' for domain #{domain}"
