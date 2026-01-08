@@ -16,6 +16,7 @@ module Postal
       "postal.web_protocol" => -> (c) { c.dig("web", "protocol") },
       "postal.smtp_hostname" => -> (c) { c.dig("dns", "smtp_server_hostname") },
       "postal.use_ip_pools" => -> (c) { c.dig("general", "use_ip_pools") },
+      "postal.disable_ipv6" => -> (c) { c.dig("general", "disable_ipv6") || c["disable_ipv6"] },
       "logging.sentry_dsn" => -> (c) { c.dig("general", "exception_url") },
       "postal.default_maximum_delivery_attempts" => -> (c) { c.dig("general", "maximum_delivery_attempts") },
       "postal.default_maximum_hold_expiry_days" => -> (c) { c.dig("general", "maximum_hold_expiry_days") },
