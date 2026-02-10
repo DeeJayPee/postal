@@ -195,7 +195,7 @@ bundle exec rake postal:smtp_rollup:stats
 - `max_smtp_out` - Maximum concurrent SMTP connections
 - `max_rcpt_per_message` - Max recipients per message
 - `max_msg_rate` - Maximum message rate limit (e.g., 2000/h, 100/m, 10/s)
-- `backoff_reroute_to` - IP address to use for backoff/throttling scenarios
+- `backoff_reroute_to` - Alternative SMTP relay server (hostname or IP) for routing
 - `enabled` - Active status
 
 ### queued_messages (modified)

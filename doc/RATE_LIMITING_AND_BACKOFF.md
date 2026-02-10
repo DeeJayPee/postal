@@ -55,31 +55,33 @@ This limits the `orange.queue` to 2000 messages per hour.
 ## backoff-reroute-to
 
 ### Purpose
-Specify an alternative IP address to use when sending through a specific virtual queue. This is useful for:
-- ISP-specific IP reputation management
-- Throttling scenarios where you want to use a different IP
-- Segregating traffic by queue to different source IPs
+Specify an alternative SMTP relay server to route messages through for a specific virtual queue. This is useful for:
+- Routing throttled traffic through a different relay
+- ISP-specific relay routing
+- Load balancing across multiple relay servers
+- Using dedicated relays for specific destinations
 
 ### Format
 ```
-backoff-reroute-to <ip_address>
+backoff-reroute-to <hostname_or_ip>
 ```
 
-Supports both IPv4 and IPv6 addresses.
+Supports hostnames, IPv4, and IPv6 addresses.
 
 ### Examples
 ```
+backoff-reroute-to relay.example.com
 backoff-reroute-to 192.168.1.100
 backoff-reroute-to 10.0.0.50
-backoff-reroute-to 2001:db8::1
+backoff-reroute-to [2001:db8::1]
 ```
 
 ### How It Works
 
 1. When `SMTPSenderWithRollup` is initialized for a domain with a queue configuration
-2. If `backoff-reroute-to` is set, it overrides the source IP address for all connections
-3. All SMTP connections for that virtual queue will originate from the specified IP
-4. This happens before the SMTP session starts
+2. If `backoff-reroute-to` is set, it creates an `SMTPClient::Server` pointing to the relay
+3. All messages for that virtual queue will be routed through the specified relay server
+4. The relay server is used instead of direct MX record resolution
 
 ### Configuration Example
 ```
@@ -87,11 +89,11 @@ backoff-reroute-to 2001:db8::1
     min-smtp-out 1
     max-smtp-out 1
     max-rcpt-per-message 50
-    backoff-reroute-to 10.0.0.50
+    backoff-reroute-to relay.backup.example.com
 </domain>
 ```
 
-All messages sent through `throttled.queue` will use `10.0.0.50` as the source IP.
+All messages sent through `throttled.queue` will be routed through `relay.backup.example.com` instead of direct delivery.
 
 ## Combined Usage
 
@@ -135,27 +137,27 @@ When warming up a new IP, start with low rates:
 </domain>
 ```
 
-### 3. IP Reputation Segregation
-Use different IPs for different ISPs:
+### 3. Relay Segregation
+Use different relay servers for different ISPs:
 
 ```
 <domain gmail.queue>
-    backoff-reroute-to 192.168.1.10
+    backoff-reroute-to relay-gmail.example.com
 </domain>
 
 <domain yahoo.queue>
-    backoff-reroute-to 192.168.1.20
+    backoff-reroute-to relay-yahoo.example.com
 </domain>
 ```
 
 ### 4. Throttling Response
-When an ISP starts throttling, reduce rate and switch IP:
+When an ISP starts throttling, reduce rate and route through backup relay:
 
 ```
 <domain throttled.queue>
     max-smtp-out 1
     max-msg-rate 100/h
-    backoff-reroute-to 10.0.0.50
+    backoff-reroute-to backup-relay.example.com
 </domain>
 ```
 
@@ -176,9 +178,9 @@ t.string :backoff_reroute_to     # IP address (IPv4 or IPv6)
 - Invalid: `2000`, `100/hour`, `abc/h`
 
 ### backoff_reroute_to
-- Must be a valid IP address (IPv4 or IPv6)
-- Examples: `192.168.1.1`, `10.0.0.1`, `2001:db8::1`
-- Invalid: `not-an-ip`, `999.999.999.999`
+- Must be a valid hostname or IP address
+- Examples: `relay.example.com`, `192.168.1.1`, `10.0.0.1`, `[2001:db8::1]`
+- Invalid: `not a valid hostname`, `999.999.999.999`
 
 ## Monitoring
 
@@ -201,11 +203,11 @@ WHERE virtual_queue = 'orange.queue'
   AND created_at >= NOW() - INTERVAL 1 HOUR;
 ```
 
-### Verify Backoff IP
+### Verify Backoff Relay
 ```ruby
 config = QueueConfiguration.find_by(queue_name: 'throttled.queue')
-ip = config.backoff_ip_address
-# => #<IPAddress::IPv4:...>
+relay = config.backoff_relay_server
+# => "relay.example.com"
 ```
 
 ## Logging

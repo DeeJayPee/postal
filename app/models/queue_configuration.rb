@@ -82,17 +82,12 @@ class QueueConfiguration < ApplicationRecord
     sent_count < rate[:count]
   end
 
-  # Get the backoff reroute IP address if configured
-  def backoff_ip_address
+  # Get the backoff reroute relay server if configured
+  # Returns the hostname or IP address to use as an alternative relay
+  def backoff_relay_server
     return nil if backoff_reroute_to.blank?
 
-    # Parse IP address (supports both IPv4 and IPv6)
-    begin
-      require 'ipaddr'
-      IPAddr.new(backoff_reroute_to)
-    rescue IPAddr::InvalidAddressError, ArgumentError
-      nil
-    end
+    backoff_reroute_to
   end
 
   private
@@ -108,11 +103,14 @@ class QueueConfiguration < ApplicationRecord
   def validate_backoff_reroute_to_format
     return if backoff_reroute_to.blank?
 
-    begin
-      require 'ipaddr'
-      IPAddr.new(backoff_reroute_to)
-    rescue IPAddr::InvalidAddressError, ArgumentError
-      errors.add(:backoff_reroute_to, 'must be a valid IP address (IPv4 or IPv6)')
+    # Validate hostname or IP address format
+    # Allow: hostnames (relay.example.com), IPv4 (192.168.1.1), IPv6 ([2001:db8::1])
+    hostname_pattern = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/
+    ipv4_pattern = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+    ipv6_pattern = /^\[?(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\]?$|^\[?::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}\]?$|^\[?[0-9a-fA-F]{1,4}::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}\]?$/
+
+    unless backoff_reroute_to =~ hostname_pattern || backoff_reroute_to =~ ipv4_pattern || backoff_reroute_to =~ ipv6_pattern
+      errors.add(:backoff_reroute_to, 'must be a valid hostname or IP address')
     end
   end
 

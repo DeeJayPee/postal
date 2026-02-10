@@ -46,7 +46,7 @@ Queue configurations define the SMTP connection behavior for each virtual queue:
 - `max-smtp-out`: Maximum concurrent SMTP connections
 - `max-rcpt-per-message`: Maximum recipients per message
 - `max-msg-rate`: Maximum message rate limit (format: `number/unit` where unit is `d` for day, `h` for hour, `m` for minute, or `s` for second)
-- `backoff-reroute-to`: IP address to use when this queue is in backoff/throttling mode
+- `backoff-reroute-to`: Alternative SMTP relay server (hostname or IP) to route messages through for this queue
 
 **Example:**
 ```

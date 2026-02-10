@@ -7,14 +7,15 @@ class SMTPSenderWithRollup < SMTPSender
   attr_reader :queue_config, :virtual_queue_name
 
   def initialize(domain, source_ip_address = nil, servers: nil, log_id: nil, rcpt_to: nil)
-    # Resolve virtual queue configuration first to check for backoff IP override
+    # Resolve virtual queue configuration
     @virtual_queue_name = SMTPRollupService.resolve_virtual_queue(domain)
     @queue_config = SMTPRollupService.queue_configuration_for_domain(domain) if @virtual_queue_name
 
-    # Override source IP if backoff-reroute-to is configured
-    if @queue_config&.backoff_ip_address
-      source_ip_address = @queue_config.backoff_ip_address
-      logger.info "Using backoff reroute IP: #{source_ip_address}" if defined?(logger)
+    # Override servers if backoff-reroute-to is configured (relay server)
+    if @queue_config&.backoff_relay_server
+      relay_host = @queue_config.backoff_relay_server
+      servers = [SMTPClient::Server.new(relay_host)]
+      logger.info "Using backoff relay server: #{relay_host}" if defined?(logger)
     end
 
     super(domain, source_ip_address, servers: servers, log_id: log_id, rcpt_to: rcpt_to)
