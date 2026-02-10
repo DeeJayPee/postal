@@ -10,13 +10,7 @@ class SMTPSenderWithRollup < SMTPSender
     # Resolve virtual queue configuration
     @virtual_queue_name = SMTPRollupService.resolve_virtual_queue(domain)
     @queue_config = SMTPRollupService.queue_configuration_for_domain(domain) if @virtual_queue_name
-
-    # Override servers if backoff-reroute-to is configured (relay server)
-    if @queue_config&.backoff_relay_server
-      relay_host = @queue_config.backoff_relay_server
-      servers = [SMTPClient::Server.new(relay_host)]
-      logger.info "Using backoff relay server: #{relay_host}" if defined?(logger)
-    end
+    @use_backoff_relay = false  # Track if we should use backoff relay
 
     super(domain, source_ip_address, servers: servers, log_id: log_id, rcpt_to: rcpt_to)
 
@@ -26,13 +20,24 @@ class SMTPSenderWithRollup < SMTPSender
       if @queue_config&.max_msg_rate
         logger.info "Rate limit: #{@queue_config.max_msg_rate}"
       end
+      if @queue_config&.backoff_relay_server
+        logger.info "Backoff relay available: #{@queue_config.backoff_relay_server}"
+      end
     end
   end
 
   # Override start to respect queue configuration limits
   def start
-    # Get servers - if backoff relay is configured, @servers will already be set
-    servers = @servers || self.class.smtp_relays || resolve_mx_records_for_domain || []
+    # Check if we should use backoff relay (rate limited or previous failures)
+    if should_use_backoff_relay?
+      @use_backoff_relay = true
+      relay_host = @queue_config.backoff_relay_server
+      logger.info "Using backoff relay server: #{relay_host}"
+      servers = [SMTPClient::Server.new(relay_host)]
+    else
+      # Normal routing: use provided servers, global relays, or MX records
+      servers = @servers || self.class.smtp_relays || resolve_mx_records_for_domain || []
+    end
 
     if servers.empty?
       logger.error "No servers available to connect to for domain #{@domain}"
@@ -88,6 +93,26 @@ class SMTPSenderWithRollup < SMTPSender
       logger.warn "Rate limit reached for queue #{@virtual_queue_name} (#{@queue_config.max_msg_rate})"
     end
     can_send
+  end
+
+  # Determine if we should use the backoff relay server
+  # Use it when: rate limited OR backoff relay is configured and we have connection errors
+  def should_use_backoff_relay?
+    return false unless @queue_config&.backoff_relay_server
+
+    # Use backoff relay if rate limited
+    if @queue_config.max_msg_rate.present? && !@queue_config.can_send_message?
+      logger.info "Rate limit reached, switching to backoff relay"
+      return true
+    end
+
+    # Use backoff relay if we've had connection failures (check @connection_errors)
+    if @connection_errors.any?
+      logger.info "Connection failures detected, switching to backoff relay"
+      return true
+    end
+
+    false
   end
 
   private
