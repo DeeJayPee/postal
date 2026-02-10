@@ -31,14 +31,30 @@ class SMTPSenderWithRollup < SMTPSender
 
   # Override start to respect queue configuration limits
   def start
+    # Get servers - if backoff relay is configured, @servers will already be set
     servers = @servers || self.class.smtp_relays || resolve_mx_records_for_domain || []
+
+    if servers.empty?
+      logger.error "No servers available to connect to for domain #{@domain}"
+      return false
+    end
 
     # Limit the number of servers we try based on queue configuration
     max_connections = @queue_config&.effective_max_smtp_out || servers.size
     servers_to_try = servers.take(max_connections)
 
+    logger.info "Attempting to connect to #{servers_to_try.size} server(s)" if @virtual_queue_name
+
     servers_to_try.each do |server|
-      server.endpoints.each do |endpoint|
+      logger.info "Resolving endpoints for server: #{server.hostname}" if @virtual_queue_name
+      endpoints = server.endpoints
+
+      if endpoints.empty?
+        logger.warn "No endpoints found for server #{server.hostname}" if @virtual_queue_name
+        next
+      end
+
+      endpoints.each do |endpoint|
         result = connect_to_endpoint(endpoint)
         return endpoint if result
       end
