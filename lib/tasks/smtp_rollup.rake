@@ -140,6 +140,8 @@ namespace :postal do
             puts "  → min_smtp_out: #{current_queue.min_smtp_out}"
             puts "  → max_smtp_out: #{current_queue.max_smtp_out}"
             puts "  → max_rcpt_per_message: #{current_queue.max_rcpt_per_message}"
+            puts "  → max_msg_rate: #{current_queue.max_msg_rate}" if current_queue.max_msg_rate.present?
+            puts "  → backoff_reroute_to: #{current_queue.backoff_reroute_to}" if current_queue.backoff_reroute_to.present?
             count += 1
           elsif current_queue
             puts "✗ Failed to import: #{current_queue.queue_name} (#{current_queue.errors.full_messages.join(', ')})"
@@ -152,6 +154,10 @@ namespace :postal do
             current_queue.max_smtp_out = ::Regexp.last_match(1).to_i
           elsif line =~ /^\s*max-rcpt-per-message\s+(\d+)/
             current_queue.max_rcpt_per_message = ::Regexp.last_match(1).to_i
+          elsif line =~ /^\s*max-msg-rate\s+(\d+\/[dhms])/
+            current_queue.max_msg_rate = ::Regexp.last_match(1)
+          elsif line =~ /^\s*backoff-reroute-to\s+(\S+)/
+            current_queue.backoff_reroute_to = ::Regexp.last_match(1)
           end
         end
       end
@@ -212,6 +218,8 @@ namespace :postal do
           f.puts "    min-smtp-out #{config.min_smtp_out}"
           f.puts "    max-smtp-out #{config.max_smtp_out}"
           f.puts "    max-rcpt-per-message #{config.max_rcpt_per_message}"
+          f.puts "    max-msg-rate #{config.max_msg_rate}" if config.max_msg_rate.present?
+          f.puts "    backoff-reroute-to #{config.backoff_reroute_to}" if config.backoff_reroute_to.present?
           f.puts "</domain>"
           f.puts ""
         end

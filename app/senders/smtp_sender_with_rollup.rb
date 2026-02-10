@@ -62,19 +62,15 @@ class SMTPSenderWithRollup < SMTPSender
     can_send
   end
 
-  # Override to check rate limits before attempting to send
-  def send_message(raw_message, mail_from, rcpt_to)
+  private
+
+  # Override to log rollup information and check rate limits
+  def send_message_to_smtp_client(raw_message, mail_from, rcpt_to, retry_on_connection_error: true)
+    # Check rate limit before sending
     unless can_send?
       raise "Rate limit exceeded for queue #{@virtual_queue_name}"
     end
 
-    super(raw_message, mail_from, rcpt_to)
-  end
-
-  private
-
-  # Override to log rollup information
-  def send_message_to_smtp_client(raw_message, mail_from, rcpt_to, retry_on_connection_error: true)
     if @virtual_queue_name
       logger.info "Sending via virtual queue: #{@virtual_queue_name}"
     end
