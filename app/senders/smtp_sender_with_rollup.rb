@@ -131,9 +131,13 @@ class SMTPSenderWithRollup < SMTPSender
 
   # Override to log rollup information and check rate limits
   def send_message_to_smtp_client(raw_message, mail_from, rcpt_to, retry_on_connection_error: true)
-    # Check rate limit before sending
+    # Check rate limit before sending - but only block if we're NOT using backoff relay
     unless can_send?
-      raise "Rate limit exceeded for queue #{@virtual_queue_name}"
+      if @use_backoff_relay
+        logger.info "Rate limited but using backoff relay to send"
+      else
+        raise "Rate limit exceeded for queue #{@virtual_queue_name}"
+      end
     end
 
     if @virtual_queue_name
