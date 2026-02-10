@@ -88,8 +88,9 @@ class QueueConfiguration < ApplicationRecord
 
     # Parse IP address (supports both IPv4 and IPv6)
     begin
-      IPAddress.parse(backoff_reroute_to)
-    rescue StandardError
+      require 'ipaddr'
+      IPAddr.new(backoff_reroute_to)
+    rescue IPAddr::InvalidAddressError, ArgumentError
       nil
     end
   end
@@ -108,8 +109,9 @@ class QueueConfiguration < ApplicationRecord
     return if backoff_reroute_to.blank?
 
     begin
-      IPAddress.parse(backoff_reroute_to)
-    rescue StandardError
+      require 'ipaddr'
+      IPAddr.new(backoff_reroute_to)
+    rescue IPAddr::InvalidAddressError, ArgumentError
       errors.add(:backoff_reroute_to, 'must be a valid IP address (IPv4 or IPv6)')
     end
   end
