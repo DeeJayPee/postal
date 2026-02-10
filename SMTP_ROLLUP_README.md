@@ -97,7 +97,7 @@ domain-macro orange orange.fr,wanadoo.fr,orange.rollup
 
 ### Queue Configuration Example
 
-Limit concurrent connections to Orange:
+Limit concurrent connections and message rate to Orange:
 
 ```
 # config/queue_configs.conf
@@ -105,6 +105,8 @@ Limit concurrent connections to Orange:
     min-smtp-out 1
     max-smtp-out 1
     max-rcpt-per-message 100
+    max-msg-rate 2000/h
+    backoff-reroute-to 192.168.1.100
 </domain>
 ```
 
@@ -189,9 +191,11 @@ bundle exec rake postal:smtp_rollup:stats
 
 ### queue_configurations
 - `queue_name` - Virtual queue name
-- `min_smtp_out` - Minimum concurrent connections
-- `max_smtp_out` - Maximum concurrent connections
+- `min_smtp_out` - Minimum concurrent SMTP connections
+- `max_smtp_out` - Maximum concurrent SMTP connections
 - `max_rcpt_per_message` - Max recipients per message
+- `max_msg_rate` - Maximum message rate limit (e.g., 2000/h, 100/m, 10/s)
+- `backoff_reroute_to` - IP address to use for backoff/throttling scenarios
 - `enabled` - Active status
 
 ### queued_messages (modified)

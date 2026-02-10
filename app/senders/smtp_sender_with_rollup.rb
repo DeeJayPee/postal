@@ -7,15 +7,24 @@ class SMTPSenderWithRollup < SMTPSender
   attr_reader :queue_config, :virtual_queue_name
 
   def initialize(domain, source_ip_address = nil, servers: nil, log_id: nil, rcpt_to: nil)
-    super(domain, source_ip_address, servers: servers, log_id: log_id, rcpt_to: rcpt_to)
-
-    # Resolve virtual queue configuration
+    # Resolve virtual queue configuration first to check for backoff IP override
     @virtual_queue_name = SMTPRollupService.resolve_virtual_queue(domain)
     @queue_config = SMTPRollupService.queue_configuration_for_domain(domain) if @virtual_queue_name
+
+    # Override source IP if backoff-reroute-to is configured
+    if @queue_config&.backoff_ip_address
+      source_ip_address = @queue_config.backoff_ip_address
+      logger.info "Using backoff reroute IP: #{source_ip_address}" if defined?(logger)
+    end
+
+    super(domain, source_ip_address, servers: servers, log_id: log_id, rcpt_to: rcpt_to)
 
     if @virtual_queue_name
       logger.info "Using virtual queue '#{@virtual_queue_name}' for domain #{domain}"
       logger.info "Queue config: min=#{@queue_config&.min_smtp_out}, max=#{@queue_config&.max_smtp_out}" if @queue_config
+      if @queue_config&.max_msg_rate
+        logger.info "Rate limit: #{@queue_config.max_msg_rate}"
+      end
     end
   end
 
@@ -46,7 +55,20 @@ class SMTPSenderWithRollup < SMTPSender
   def can_send?
     return true unless @queue_config
 
-    @queue_config.can_send_message?
+    can_send = @queue_config.can_send_message?
+    unless can_send
+      logger.warn "Rate limit reached for queue #{@virtual_queue_name} (#{@queue_config.max_msg_rate})"
+    end
+    can_send
+  end
+
+  # Override to check rate limits before attempting to send
+  def send_message(raw_message, mail_from, rcpt_to)
+    unless can_send?
+      raise "Rate limit exceeded for queue #{@virtual_queue_name}"
+    end
+
+    super(raw_message, mail_from, rcpt_to)
   end
 
   private

@@ -45,6 +45,8 @@ Queue configurations define the SMTP connection behavior for each virtual queue:
 - `min-smtp-out`: Minimum concurrent SMTP connections
 - `max-smtp-out`: Maximum concurrent SMTP connections
 - `max-rcpt-per-message`: Maximum recipients per message
+- `max-msg-rate`: Maximum message rate limit (format: `number/unit` where unit is `d` for day, `h` for hour, `m` for minute, or `s` for second)
+- `backoff-reroute-to`: IP address to use when this queue is in backoff/throttling mode
 
 **Example:**
 ```
@@ -52,6 +54,8 @@ Queue configurations define the SMTP connection behavior for each virtual queue:
     min-smtp-out 1
     max-smtp-out 1
     max-rcpt-per-message 100
+    max-msg-rate 2000/h
+    backoff-reroute-to 192.168.1.100
 </domain>
 ```
 
@@ -140,6 +144,8 @@ domain-macro orange orange.fr,wanadoo.fr,orange.rollup
     min-smtp-out <number>
     max-smtp-out <number>
     max-rcpt-per-message <number>
+    max-msg-rate <number>/<d|h|m|s>      # Optional
+    backoff-reroute-to <ip_address>      # Optional
 </domain>
 ```
 
@@ -149,6 +155,15 @@ Example:
     min-smtp-out 2
     max-smtp-out 5
     max-rcpt-per-message 100
+    max-msg-rate 5000/h
+</domain>
+
+<domain throttled.queue>
+    min-smtp-out 1
+    max-smtp-out 1
+    max-rcpt-per-message 50
+    max-msg-rate 100/m
+    backoff-reroute-to 10.0.0.50
 </domain>
 ```
 
@@ -198,15 +213,18 @@ This exports current database configurations to `config/rollup_export/` director
 
 ### 1. ISP-Specific Throttling
 
-Limit concurrent connections to specific ISPs:
+Limit concurrent connections and message rates to specific ISPs:
 
 ```
 <domain orange.queue>
     min-smtp-out 1
     max-smtp-out 1
     max-rcpt-per-message 100
+    max-msg-rate 2000/h
 </domain>
 ```
+
+This limits Orange to 1 concurrent connection and 2000 messages per hour.
 
 ### 2. Grouping Related Domains
 
@@ -245,6 +263,8 @@ mx apc.olc.protection.outlook.com outlook-apc.rollup
 - `min_smtp_out`: Minimum concurrent connections
 - `max_smtp_out`: Maximum concurrent connections
 - `max_rcpt_per_message`: Max recipients per message
+- `max_msg_rate`: Message rate limit (e.g., "2000/h", "100/m", "10/s")
+- `backoff_reroute_to`: IP address for backoff/throttling
 - `enabled`: Whether this configuration is active
 
 ### queued_messages Table (Modified)
