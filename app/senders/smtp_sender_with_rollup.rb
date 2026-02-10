@@ -47,16 +47,27 @@ class SMTPSenderWithRollup < SMTPSender
 
     servers_to_try.each do |server|
       logger.info "Resolving endpoints for server: #{server.hostname}" if @virtual_queue_name
-      endpoints = server.endpoints
 
-      if endpoints.empty?
-        logger.warn "No endpoints found for server #{server.hostname}" if @virtual_queue_name
-        next
-      end
-
-      endpoints.each do |endpoint|
+      # Check if the hostname is actually an IP address
+      # If so, create endpoint directly instead of doing DNS resolution
+      if ip_address?(server.hostname)
+        logger.info "Server hostname is an IP address, creating endpoint directly" if @virtual_queue_name
+        endpoint = SMTPClient::Endpoint.new(server, server.hostname)
         result = connect_to_endpoint(endpoint)
         return endpoint if result
+      else
+        # Normal DNS resolution for hostnames
+        endpoints = server.endpoints
+
+        if endpoints.empty?
+          logger.warn "No endpoints found for server #{server.hostname}" if @virtual_queue_name
+          next
+        end
+
+        endpoints.each do |endpoint|
+          result = connect_to_endpoint(endpoint)
+          return endpoint if result
+        end
       end
     end
 
@@ -80,6 +91,18 @@ class SMTPSenderWithRollup < SMTPSender
   end
 
   private
+
+  # Check if a string is an IP address (IPv4 or IPv6)
+  def ip_address?(str)
+    # IPv4 pattern
+    return true if str =~ /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
+    # IPv6 pattern (simplified - matches common formats)
+    return true if str =~ /^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}$|^[0-9a-fA-F]{1,4}::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}$/
+    # IPv6 in brackets
+    return true if str =~ /^\[.*\]$/
+
+    false
+  end
 
   # Override to log rollup information and check rate limits
   def send_message_to_smtp_client(raw_message, mail_from, rcpt_to, retry_on_connection_error: true)
