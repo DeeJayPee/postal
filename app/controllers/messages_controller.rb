@@ -183,7 +183,47 @@ class MessagesController < ApplicationController
     @entries = @message.activity_entries
   end
 
+  def remove_suppression
+    address = params[:address]
+
+    # Remove from suppression list
+    removed = @server.message_db.suppression_list.remove(:recipient, address)
+
+    if removed
+      # Find and release held messages for this recipient
+      released_count = release_held_messages_for_recipient(address)
+
+      message = "#{address} has been removed from the suppression list."
+      message += " #{released_count} held message(s) released for delivery." if released_count > 0
+
+      redirect_to_with_json suppressions_organization_server_messages_path(organization, @server), notice: message
+    else
+      redirect_to_with_json suppressions_organization_server_messages_path(organization, @server), alert: "#{address} was not found on the suppression list."
+    end
+  end
+
   private
+
+  def release_held_messages_for_recipient(address)
+    # Find held messages for this recipient
+    held_messages = @server.message_db.messages(
+      where: {
+        held: true,
+        scope: "outgoing",
+        rcpt_to: address
+      }
+    )
+
+    count = 0
+    held_messages.each do |message|
+      if message.raw_message?
+        message.add_to_message_queue(manual: true)
+        count += 1
+      end
+    end
+
+    count
+  end
 
   def get_messages(scope)
     if scope == "held"
