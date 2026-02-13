@@ -28,7 +28,7 @@ class SMTPSenderWithRollup < SMTPSender
 
   # Override start to respect queue configuration limits
   def start
-    # Check if we should use backoff relay (rate limited or previous failures)
+    # Check if we should use backoff relay (backoff mode only)
     if should_use_backoff_relay?
       @use_backoff_relay = true
       relay_host = @queue_config.backoff_relay_server
@@ -96,23 +96,11 @@ class SMTPSenderWithRollup < SMTPSender
   end
 
   # Determine if we should use the backoff relay server
-  # Use it when: rate limited OR backoff relay is configured and we have connection errors
+  # Use it only when queue is in backoff mode and backoff-reroute-to is configured.
   def should_use_backoff_relay?
     return false unless @queue_config&.backoff_relay_server
 
-    # Use backoff relay if rate limited
-    if @queue_config.max_msg_rate.present? && !@queue_config.can_send_message?
-      logger.info "Rate limit reached, switching to backoff relay"
-      return true
-    end
-
-    # Use backoff relay if we've had connection failures (check @connection_errors)
-    if @connection_errors.any?
-      logger.info "Connection failures detected, switching to backoff relay"
-      return true
-    end
-
-    false
+    @queue_config.backoff?
   end
 
   private
@@ -131,12 +119,14 @@ class SMTPSenderWithRollup < SMTPSender
 
   # Override to log rollup information and check rate limits
   def send_message_to_smtp_client(raw_message, mail_from, rcpt_to, retry_on_connection_error: true)
-    # Check rate limit before sending - but only block if we're NOT using backoff relay
+    # Check rate limit before sending.
+    # Over-threshold messages should stay queued and retry later (no reroute fallback).
     unless can_send?
-      if @use_backoff_relay
-        logger.info "Rate limited but using backoff relay to send"
-      else
-        raise "Rate limit exceeded for queue #{@virtual_queue_name}"
+      retry_after = @queue_config&.rate_limit_retry_seconds || 60
+      return create_result("SoftFail") do |r|
+        r.retry = retry_after
+        r.details = "Rate limit exceeded for queue #{@virtual_queue_name}; keeping message queued"
+        r.output = "Rate limit exceeded (#{@queue_config&.max_msg_rate})"
       end
     end
 

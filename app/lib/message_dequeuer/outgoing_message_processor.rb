@@ -143,9 +143,50 @@ module MessageDequeuer
                                  queued_message.ip_address)
 
       @result = sender.send_message(queued_message.message)
+      apply_backoff_rule_to_sender_result
+      update_queue_backoff_success_tracking
       return unless @result.connect_error
 
       @state.send_result = @result
+    end
+
+    def apply_backoff_rule_to_sender_result
+      queue_name = queued_message.virtual_queue
+      return if queue_name.blank?
+      return if @result.nil?
+      return if @result.type == "Sent"
+
+      queue_config = QueueConfiguration.find_for_queue(queue_name)
+      return unless queue_config
+
+      rule = BackoffRule.match_for_response(@result.output.to_s)
+      rule ||= BackoffRule.match_for_response(@result.details.to_s)
+      return unless rule
+
+      case rule.action
+      when BackoffRule::ACTION_MODE_BACKOFF
+        queue_config.enter_backoff! unless queue_config.backoff?
+        queue_config.register_backoff_failure!
+        @result.retry = queued_message.calculate_retry_time(queued_message.attempts, queue_config.effective_backoff_base_delay).to_i
+      when BackoffRule::ACTION_BOUNCE_RCPT
+        @result.type = "HardFail"
+        @result.retry = nil
+        @result.details = "Delivery rejected by backoff rule (bounce-rcpt): #{@result.details}".strip
+      end
+    end
+
+    def update_queue_backoff_success_tracking
+      queue_name = queued_message.virtual_queue
+      return if queue_name.blank?
+
+      queue_config = QueueConfiguration.find_for_queue(queue_name)
+      return unless queue_config&.backoff?
+
+      if @result.type == "Sent"
+        queue_config.register_backoff_success!
+      else
+        queue_config.register_backoff_failure!
+      end
     end
 
     def add_recipient_to_suppression_list_on_too_many_hard_fails
@@ -180,7 +221,15 @@ module MessageDequeuer
 
     def finish_processing
       if @result.retry
-        queued_message.retry_later(@result.retry.is_a?(Integer) ? @result.retry : nil)
+        retry_seconds = @result.retry.is_a?(Integer) ? @result.retry : nil
+        queue_config = queued_message.virtual_queue.present? ? QueueConfiguration.find_for_queue(queued_message.virtual_queue) : nil
+
+        if queue_config&.backoff?
+          backoff_retry_seconds = queued_message.calculate_retry_time(queued_message.attempts, queue_config.effective_backoff_base_delay).to_i
+          retry_seconds = retry_seconds.nil? ? backoff_retry_seconds : [retry_seconds, backoff_retry_seconds].max
+        end
+
+        queued_message.retry_later(retry_seconds)
         log "message requeued for trying later", retry_after: queued_message.retry_after
         stop_processing
       end

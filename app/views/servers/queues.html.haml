@@ -1,0 +1,105 @@
+- page_title << @server.name
+- page_title << "Messages"
+- page_title << "Queues"
+= render 'sidebar', :active_server => @server
+= render 'header', :active_nav => :messages
+= render 'messages/header', :active_nav => :queues
+
+.pageContent
+  %p.pageContent__intro.u-margin
+    This page shows queue state for this server and loaded queue configuration/backoff rules.
+
+  - if @queue_names.empty?
+    .noData.noData--clean
+      %h2.noData__title No queue configuration or virtual queues found.
+      %p.noData__text
+        Import queue configs to see loaded settings, then send traffic to populate queue metrics.
+  - else
+    .u-margin
+      %h2.pageContent__subTitle Queue status & loaded configuration
+      %table.dataTable.u-margin-half
+        %thead
+          %tr
+            %td Queue
+            %td Mode
+            %td Total
+            %td Ready
+            %td Delayed
+            %td Locked
+            %td Max Attempts
+            %td Oldest
+            %td Next Retry
+            %td Max Msg Rate
+            %td SMTP Out
+            %td Max Rcpt
+            %td Backoff Relay
+            %td Backoff Delay
+            %td Auto Return
+            %td Action
+        %tbody
+          - @queue_names.each do |queue_name|
+            - config = @queue_configs[queue_name]
+            - total = @queue_totals[queue_name].to_i
+            - delayed = @queue_delayed[queue_name].to_i
+            - locked = @queue_locked[queue_name].to_i
+            - ready = [total - delayed, 0].max
+            - oldest = @queue_oldest[queue_name]
+            - next_retry = @queue_next_retry[queue_name]
+            - max_attempts = @queue_max_attempts[queue_name]
+            - auto_return = if config&.backoff_auto_success_threshold.present? && config&.backoff_auto_success_window_seconds.present?
+                "#{config.backoff_auto_success_threshold} in #{distance_of_time_in_words(Time.current, Time.current + config.backoff_auto_success_window_seconds)}"
+              else
+                "manual"
+              end
+            %tr
+              %td= queue_name
+              %td= config&.mode || "unconfigured"
+              %td= number_with_delimiter(total)
+              %td= number_with_delimiter(ready)
+              %td= number_with_delimiter(delayed)
+              %td= number_with_delimiter(locked)
+              %td= max_attempts || "-"
+              %td= oldest ? oldest.to_fs(:short) : "-"
+              %td= next_retry ? next_retry.to_fs(:short) : "-"
+              %td= config&.max_msg_rate || "-"
+              %td
+                - if config
+                  = "#{config.min_smtp_out}-#{config.max_smtp_out}"
+                - else
+                  = "-"
+              %td= config&.max_rcpt_per_message || "-"
+              %td= config&.backoff_reroute_to || "-"
+              %td
+                - if config&.backoff_base_delay_seconds.present?
+                  = distance_of_time_in_words(Time.current, Time.current + config.backoff_base_delay_seconds)
+                - else
+                  = "-"
+              %td= auto_return
+              %td
+                - if config
+                  - target_mode = config.backoff? ? "normal" : "backoff"
+                  - label = config.backoff? ? "Set normal" : "Set backoff"
+                  = button_to label,
+                              set_queue_mode_organization_server_path(organization, @server, queue_name: queue_name, mode: target_mode),
+                              method: :post,
+                              class: ["button", (config.backoff? ? "button--positive" : "button--danger")]
+                - else
+                  = "-"
+
+  .u-margin
+    %h2.pageContent__subTitle Loaded global backoff rules
+    - if @backoff_rules.empty?
+      %p.pageContent__text No backoff rules loaded.
+    - else
+      %table.dataTable.u-margin-half
+        %thead
+          %tr
+            %td Action
+            %td Pattern
+            %td Source List
+        %tbody
+          - @backoff_rules.each do |rule|
+            %tr
+              %td= rule.action
+              %td= "/#{rule.pattern}/"
+              %td= rule.description.presence || "-"

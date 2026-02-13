@@ -1,13 +1,15 @@
-# Rate Limiting and Backoff IP Rerouting
+# Rate Limiting, Queue Backoff Mode and Backoff Rerouting
 
-This document explains the `max-msg-rate` and `backoff-reroute-to` features added to the SMTP rollup queue configurations.
+This document explains `max-msg-rate`, queue `mode` (`normal`/`backoff`), global backoff rules, and `backoff-reroute-to` behavior.
 
 ## Overview
 
-These features provide PowerMTA-style rate limiting and IP rerouting capabilities for virtual queues:
+These features provide PowerMTA-style queue control for virtual queues:
 
-- **`max-msg-rate`**: Time-based message rate limiting per queue
-- **`backoff-reroute-to`**: Alternative IP address for throttled/backoff scenarios
+- **`max-msg-rate`**: Time-based message rate limiting per queue (defer/retry in queue)
+- **`mode`**: Queue mode (`normal` or `backoff`)
+- **`backoff-reroute-to`**: Alternative relay used only while queue is in `backoff` mode
+- **Global backoff rules**: Imported SMTP reply patterns that switch queues to backoff or bounce recipients
 
 ## max-msg-rate
 
@@ -37,7 +39,7 @@ max-msg-rate 10/s     # 10 messages per second
 
 1. When a message is about to be sent via `SMTPSenderWithRollup`, the system checks if the queue has a `max-msg-rate` configured
 2. It counts messages sent through that virtual queue in the configured time window
-3. If the limit is reached, sending is blocked with a rate limit error
+3. If the limit is reached, sending is deferred (soft-fail) and retried later from the same queue
 4. The counter resets based on the sliding time window
 
 ### Configuration Example
@@ -51,6 +53,22 @@ max-msg-rate 10/s     # 10 messages per second
 ```
 
 This limits the `orange.queue` to 2000 messages per hour.
+
+## Queue Mode (`normal` / `backoff`)
+
+Queues can run in two modes:
+
+- `normal`: default behavior
+- `backoff`: gentler delivery pacing with larger retry separation
+
+When in backoff mode, retry delays use exponential retry with a queue-specific base delay (default 2 hours).
+
+Optional automatic return to normal mode can be configured using:
+
+```
+backoff-auto-success-threshold <number>
+backoff-auto-success-window <number><d|h|m|s>
+```
 
 ## backoff-reroute-to
 
@@ -78,10 +96,11 @@ backoff-reroute-to [2001:db8::1]
 
 ### How It Works
 
-1. When `SMTPSenderWithRollup` is initialized for a domain with a queue configuration
-2. If `backoff-reroute-to` is set, it creates an `SMTPClient::Server` pointing to the relay
-3. All messages for that virtual queue will be routed through the specified relay server
-4. The relay server is used instead of direct MX record resolution
+1. Queue is in `backoff` mode
+2. `backoff-reroute-to` is configured
+3. SMTP sender uses the configured relay server for that queue while it remains in backoff
+
+`backoff-reroute-to` is not used just because `max-msg-rate` threshold is hit.
 
 ### Configuration Example
 ```
@@ -93,7 +112,7 @@ backoff-reroute-to [2001:db8::1]
 </domain>
 ```
 
-All messages sent through `throttled.queue` will be routed through `relay.backup.example.com` instead of direct delivery.
+While the queue is in `backoff` mode, messages for `throttled.queue` are routed through `relay.backup.example.com`.
 
 ## Combined Usage
 
@@ -105,6 +124,8 @@ You can use both features together for comprehensive queue management:
     max-smtp-out 2
     max-rcpt-per-message 50
     max-msg-rate 500/h
+    mode normal
+    backoff-base-delay 2h
     backoff-reroute-to 192.168.1.200
 </domain>
 ```
@@ -112,8 +133,8 @@ You can use both features together for comprehensive queue management:
 This configuration:
 - Limits concurrent connections to 2
 - Limits recipients per message to 50
-- Limits total messages to 500 per hour
-- Uses IP `192.168.1.200` for all connections
+- Limits total messages to 500 per hour (deferred/retried in queue when exceeded)
+- Uses relay `192.168.1.200` only if the queue is switched into `backoff` mode
 
 ## Use Cases
 
@@ -133,6 +154,7 @@ When warming up a new IP, start with low rates:
 <domain warmup.queue>
     max-smtp-out 1
     max-msg-rate 50/h
+    backoff-base-delay 2h
     backoff-reroute-to 10.0.0.100
 </domain>
 ```
@@ -142,23 +164,36 @@ Use different relay servers for different ISPs:
 
 ```
 <domain gmail.queue>
+    mode backoff
     backoff-reroute-to relay-gmail.example.com
 </domain>
 
 <domain yahoo.queue>
+    mode backoff
     backoff-reroute-to relay-yahoo.example.com
 </domain>
 ```
 
 ### 4. Throttling Response
-When an ISP starts throttling, reduce rate and route through backup relay:
+When an ISP starts throttling, imported backoff rules switch queue mode to `backoff` and routing can move to backup relay:
 
 ```
 <domain throttled.queue>
     max-smtp-out 1
     max-msg-rate 100/h
+    mode normal
+    backoff-base-delay 2h
     backoff-reroute-to backup-relay.example.com
 </domain>
+```
+
+And global rules in `backoff_rules.conf`:
+
+```
+<smtp-pattern-list blocking-errors>
+    reply /421 .* Please try again later/ mode=backoff
+    reply /OverQuotaTemp/ bounce-rcpt
+</smtp-pattern-list>
 ```
 
 ## Database Schema
@@ -168,6 +203,10 @@ The `queue_configurations` table includes:
 ```ruby
 t.string :max_msg_rate           # Format: "2000/h", "100/m", "10/s"
 t.string :backoff_reroute_to     # IP address (IPv4 or IPv6)
+t.string :mode                   # normal or backoff
+t.integer :backoff_base_delay_seconds
+t.integer :backoff_auto_success_threshold
+t.integer :backoff_auto_success_window_seconds
 ```
 
 ## Validation
@@ -206,16 +245,18 @@ WHERE virtual_queue = 'orange.queue'
 ### Verify Backoff Relay
 ```ruby
 config = QueueConfiguration.find_by(queue_name: 'throttled.queue')
+config.mode
+# => "backoff" or "normal"
 relay = config.backoff_relay_server
 # => "relay.example.com"
 ```
 
 ## Logging
 
-The system logs rate limiting and IP rerouting activity:
+The system logs queue mode, rate limiting, and backoff relay usage:
 
 ```
-INFO  Using backoff reroute IP: 192.168.1.100
+INFO  Using backoff relay server: 192.168.1.100
 INFO  Rate limit: 2000/h
 WARN  Rate limit reached for queue orange.queue (2000/h)
 ```
@@ -257,12 +298,13 @@ The syntax is identical for these parameters.
 2. Verify validation: `bundle exec rails runner 'config = QueueConfiguration.find_by(queue_name: "your.queue"); config.valid?; puts config.errors.full_messages'`
 3. Check logs for rate limit warnings
 
-### Backoff IP Not Being Used
-1. Verify IP is valid: `bundle exec rails runner 'puts QueueConfiguration.find_by(queue_name: "your.queue").backoff_ip_address'`
-2. Check logs for "Using backoff reroute IP" message
-3. Ensure the IP exists on your server: `ip addr show`
+### Backoff Relay Not Being Used
+1. Verify queue mode is `backoff`: `bundle exec rails runner 'puts QueueConfiguration.find_by(queue_name: "your.queue").mode'`
+2. Verify relay is configured: `bundle exec rails runner 'puts QueueConfiguration.find_by(queue_name: "your.queue").backoff_reroute_to'`
+3. Check logs for "Using backoff relay server" message
 
 ### Messages Still Being Sent Despite Rate Limit
 1. Check if messages are in the correct virtual queue
 2. Verify the time window calculation
-3. Check for multiple queue configurations with the same name
+3. Confirm messages are deferred (SoftFail/retry) instead of rerouted
+4. Check for multiple queue configurations with the same name
