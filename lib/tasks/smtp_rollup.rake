@@ -142,6 +142,8 @@ namespace :postal do
             puts "  → max_rcpt_per_message: #{current_queue.max_rcpt_per_message}"
             puts "  → max_msg_rate: #{current_queue.max_msg_rate}" if current_queue.max_msg_rate.present?
             puts "  → backoff_reroute_to: #{current_queue.backoff_reroute_to}" if current_queue.backoff_reroute_to.present?
+            puts "  → mode: #{current_queue.mode}" if current_queue.mode.present?
+            puts "  → backoff_base_delay_seconds: #{current_queue.backoff_base_delay_seconds}" if current_queue.backoff_base_delay_seconds.present?
             count += 1
           elsif current_queue
             puts "✗ Failed to import: #{current_queue.queue_name} (#{current_queue.errors.full_messages.join(', ')})"
@@ -158,6 +160,14 @@ namespace :postal do
             current_queue.max_msg_rate = ::Regexp.last_match(1)
           elsif line =~ /^\s*backoff-reroute-to\s+(\S+)/
             current_queue.backoff_reroute_to = ::Regexp.last_match(1)
+          elsif line =~ /^\s*mode\s+(normal|backoff)/
+            current_queue.mode = ::Regexp.last_match(1)
+          elsif line =~ /^\s*backoff-base-delay\s+(\d+)([dhms])/
+            current_queue.backoff_base_delay_seconds = QueueConfiguration.duration_to_seconds(::Regexp.last_match(1).to_i, ::Regexp.last_match(2))
+          elsif line =~ /^\s*backoff-auto-success-threshold\s+(\d+)/
+            current_queue.backoff_auto_success_threshold = ::Regexp.last_match(1).to_i
+          elsif line =~ /^\s*backoff-auto-success-window\s+(\d+)([dhms])/
+            current_queue.backoff_auto_success_window_seconds = QueueConfiguration.duration_to_seconds(::Regexp.last_match(1).to_i, ::Regexp.last_match(2))
           end
         end
       end
@@ -165,7 +175,27 @@ namespace :postal do
       puts "\nImported #{count} queue configuration(s)"
     end
 
-    desc "Import all rollup configurations (MX rollups, domain macros, and queue configs)"
+    desc "Import global SMTP backoff rules from configuration file"
+    task :import_backoff_rules, [:file_path] => :environment do |_t, args|
+      file_path = resolve_rollup_config_path(args[:file_path], "backoff_rules.conf")
+
+      unless file_path
+        searched = [
+          args[:file_path],
+          (File.join(rollup_config_dir, "backoff_rules.conf") if rollup_config_dir),
+          Rails.root.join("config", "backoff_rules.conf")
+        ].compact
+        puts "Error: Configuration file not found. Looked in:\n#{searched.map { |p| "  - #{p}" }.join("\n") }"
+        exit 1
+      end
+
+      config_text = File.read(file_path)
+      BackoffRule.import_from_config(config_text)
+      puts "✓ Imported backoff rules from #{file_path}"
+      puts "  → enabled rules: #{BackoffRule.enabled.count}"
+    end
+
+    desc "Import all rollup configurations (MX rollups, domain macros, queue configs, and backoff rules)"
     task import_all: :environment do
       puts "=== Importing MX Rollups ==="
       Rake::Task["postal:smtp_rollup:import_mx_rollups"].invoke
@@ -175,6 +205,9 @@ namespace :postal do
 
       puts "\n=== Importing Queue Configurations ==="
       Rake::Task["postal:smtp_rollup:import_queue_configs"].invoke
+
+      puts "\n=== Importing Backoff Rules ==="
+      Rake::Task["postal:smtp_rollup:import_backoff_rules"].invoke
 
       puts "\n✓ All configurations imported successfully!"
     end
@@ -220,9 +253,28 @@ namespace :postal do
           f.puts "    max-rcpt-per-message #{config.max_rcpt_per_message}"
           f.puts "    max-msg-rate #{config.max_msg_rate}" if config.max_msg_rate.present?
           f.puts "    backoff-reroute-to #{config.backoff_reroute_to}" if config.backoff_reroute_to.present?
+          f.puts "    mode #{config.mode}" if config.mode.present?
+          if config.backoff_base_delay_seconds.present?
+            hours = (config.backoff_base_delay_seconds.to_i / 3600.0)
+            f.puts "    backoff-base-delay #{hours.ceil}h"
+          end
+          f.puts "    backoff-auto-success-threshold #{config.backoff_auto_success_threshold}" if config.backoff_auto_success_threshold.present?
+          if config.backoff_auto_success_window_seconds.present?
+            hours = (config.backoff_auto_success_window_seconds.to_i / 3600.0)
+            f.puts "    backoff-auto-success-window #{hours.ceil}h"
+          end
           f.puts "</domain>"
           f.puts ""
         end
+      end
+
+      File.open(output_dir.join("backoff_rules.conf"), "w") do |f|
+        f.puts "# Global SMTP Backoff Rules"
+        f.puts "<smtp-pattern-list blocking-errors>"
+        BackoffRule.enabled.order(:id).each do |rule|
+          f.puts "    reply /#{rule.pattern}/ #{rule.action}"
+        end
+        f.puts "</smtp-pattern-list>"
       end
 
       puts "✓ Configurations exported to #{output_dir}"
@@ -235,12 +287,54 @@ namespace :postal do
       puts "MX Rollups: #{MXRollup.enabled.count}"
       puts "Domain Macros: #{DomainMacro.enabled.count}"
       puts "Queue Configurations: #{QueueConfiguration.enabled.count}"
+      puts "Backoff Rules: #{BackoffRule.enabled.count}"
       puts ""
 
       puts "=== Rollup Groups ==="
       MXRollup.enabled.group(:rollup_name).count.each do |rollup_name, count|
         puts "  #{rollup_name}: #{count} MX record(s)"
       end
+    end
+
+    desc "Set queue mode (normal|backoff). Usage: rake postal:smtp_rollup:set_queue_mode[queue,mode]"
+    task :set_queue_mode, [:queue_name, :mode] => :environment do |_t, args|
+      queue_name = args[:queue_name].to_s
+      mode = args[:mode].to_s
+
+      if queue_name.blank? || !QueueConfiguration::MODES.include?(mode)
+        puts "Usage: bundle exec rake postal:smtp_rollup:set_queue_mode[queue_name,normal|backoff]"
+        exit 1
+      end
+
+      queue = QueueConfiguration.find_for_queue(queue_name)
+      unless queue
+        puts "Queue not found or disabled: #{queue_name}"
+        exit 1
+      end
+
+      mode == "backoff" ? queue.enter_backoff! : queue.exit_backoff!
+      puts "✓ Queue #{queue_name} set to #{queue.mode} mode"
+    end
+
+    desc "Show queue mode. Usage: rake postal:smtp_rollup:queue_mode[queue]"
+    task :queue_mode, [:queue_name] => :environment do |_t, args|
+      queue_name = args[:queue_name].to_s
+      if queue_name.blank?
+        puts "Usage: bundle exec rake postal:smtp_rollup:queue_mode[queue_name]"
+        exit 1
+      end
+
+      queue = QueueConfiguration.find_for_queue(queue_name)
+      unless queue
+        puts "Queue not found or disabled: #{queue_name}"
+        exit 1
+      end
+
+      puts "Queue: #{queue.queue_name}"
+      puts "Mode: #{queue.mode}"
+      puts "Backoff base delay: #{queue.effective_backoff_base_delay}s"
+      puts "Backoff started at: #{queue.backoff_started_at || '-'}"
+      puts "Backoff success count: #{queue.backoff_success_count}"
     end
 
   end

@@ -20,10 +20,17 @@
 #
 
 class QueueConfiguration < ApplicationRecord
+  MODES = %w[normal backoff].freeze
+
   validates :queue_name, presence: true, uniqueness: true
   validates :min_smtp_out, numericality: { greater_than_or_equal_to: 1 }
   validates :max_smtp_out, numericality: { greater_than_or_equal_to: 1 }
   validates :max_rcpt_per_message, numericality: { greater_than_or_equal_to: 1 }
+  validates :mode, inclusion: { in: MODES }, allow_nil: true
+  validates :backoff_base_delay_seconds, numericality: { greater_than_or_equal_to: 1 }, allow_nil: true
+  validates :backoff_auto_success_threshold, numericality: { greater_than_or_equal_to: 1 }, allow_nil: true
+  validates :backoff_auto_success_window_seconds, numericality: { greater_than_or_equal_to: 1 }, allow_nil: true
+  validates :backoff_success_count, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validate :validate_max_msg_rate_format
   validate :validate_backoff_reroute_to_format
 
@@ -42,6 +49,83 @@ class QueueConfiguration < ApplicationRecord
   # Get the effective min concurrent connections for this queue
   def effective_min_smtp_out
     [min_smtp_out || 1, effective_max_smtp_out].min
+  end
+
+  def normal?
+    mode.to_s == "normal"
+  end
+
+  def backoff?
+    mode.to_s == "backoff"
+  end
+
+  def enter_backoff!
+    update!(
+      mode: "backoff",
+      backoff_started_at: Time.current,
+      backoff_last_success_at: nil,
+      backoff_success_count: 0
+    )
+  end
+
+  def exit_backoff!
+    update!(
+      mode: "normal",
+      backoff_started_at: nil,
+      backoff_last_success_at: nil,
+      backoff_success_count: 0
+    )
+  end
+
+  # Track successful sends while in backoff mode and auto-return when configured.
+  #
+  # @return [Boolean] true if queue has been switched back to normal
+  def register_backoff_success!
+    return false unless backoff?
+
+    now = Time.current
+    window = backoff_auto_success_window_seconds.to_i
+    threshold = backoff_auto_success_threshold.to_i
+    reset_count = window.positive? && backoff_last_success_at.present? && backoff_last_success_at < now - window.seconds
+    next_count = reset_count ? 1 : backoff_success_count.to_i + 1
+
+    attrs = {
+      backoff_success_count: next_count,
+      backoff_last_success_at: now
+    }
+
+    if threshold.positive? && next_count >= threshold
+      attrs.merge!(
+        mode: "normal",
+        backoff_started_at: nil,
+        backoff_last_success_at: nil,
+        backoff_success_count: 0
+      )
+      update!(attrs)
+      return true
+    end
+
+    update!(attrs)
+    false
+  end
+
+  def register_backoff_failure!
+    return unless backoff?
+
+    update_columns(backoff_last_success_at: nil, backoff_success_count: 0)
+  end
+
+  def effective_backoff_base_delay
+    [backoff_base_delay_seconds.to_i, 2.hours.to_i].max
+  end
+
+  def rate_limit_retry_seconds
+    return 60 unless max_msg_rate.present?
+
+    rate = parsed_max_msg_rate
+    return 60 unless rate
+
+    [((rate[:period].to_f / rate[:count].to_f).ceil), 60].max
   end
 
   # Parse max_msg_rate string (e.g., "2000/h", "100/m", "10000/d") into messages per second
@@ -85,7 +169,7 @@ class QueueConfiguration < ApplicationRecord
   # Get the backoff reroute relay server if configured
   # Returns the hostname or IP address to use as an alternative relay
   def backoff_relay_server
-    return nil if backoff_reroute_to.blank?
+    return nil if backoff_reroute_to.blank? || !backoff?
 
     backoff_reroute_to
   end
@@ -138,8 +222,37 @@ class QueueConfiguration < ApplicationRecord
           current_queue.max_msg_rate = ::Regexp.last_match(1)
         elsif line =~ /^\s*backoff-reroute-to\s+(\S+)/
           current_queue.backoff_reroute_to = ::Regexp.last_match(1)
+        elsif line =~ /^\s*backoff-base-delay\s+(\d+)([dhms])/
+          count = ::Regexp.last_match(1).to_i
+          unit = ::Regexp.last_match(2)
+          current_queue.backoff_base_delay_seconds = duration_to_seconds(count, unit)
+        elsif line =~ /^\s*mode\s+(normal|backoff)/
+          current_queue.mode = ::Regexp.last_match(1)
+        elsif line =~ /^\s*backoff-auto-success-threshold\s+(\d+)/
+          current_queue.backoff_auto_success_threshold = ::Regexp.last_match(1).to_i
+        elsif line =~ /^\s*backoff-auto-success-window\s+(\d+)([dhms])/
+          count = ::Regexp.last_match(1).to_i
+          unit = ::Regexp.last_match(2)
+          current_queue.backoff_auto_success_window_seconds = duration_to_seconds(count, unit)
         end
       end
     end
   end
+
+  def self.duration_to_seconds(count, unit)
+    case unit
+    when "d"
+      count.days.to_i
+    when "h"
+      count.hours.to_i
+    when "m"
+      count.minutes.to_i
+    when "s"
+      count.seconds.to_i
+    else
+      count
+    end
+  end
+
+  public_class_method :duration_to_seconds
 end

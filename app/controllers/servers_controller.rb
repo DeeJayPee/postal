@@ -4,7 +4,7 @@ class ServersController < ApplicationController
 
   include WithinOrganization
 
-  before_action :admin_required, only: [:advanced, :suspend, :unsuspend]
+  before_action :admin_required, only: [:advanced, :suspend, :unsuspend, :set_queue_mode]
   before_action { params[:id] && @server = organization.servers.present.find_by_permalink!(params[:id]) }
 
   def index
@@ -81,6 +81,40 @@ class ServersController < ApplicationController
   def queue
     @messages = @server.queued_messages.order(id: :desc).page(params[:page]).includes(:ip_address)
     @messages_with_message = @messages.include_message
+  end
+
+  def queues
+    queue_scope = @server.queued_messages.where.not(virtual_queue: [nil, ""])
+
+    @queue_totals = queue_scope.group(:virtual_queue).count
+    @queue_locked = queue_scope.where.not(locked_at: nil).group(:virtual_queue).count
+    @queue_delayed = queue_scope.where("retry_after IS NOT NULL AND retry_after > ?", Time.current).group(:virtual_queue).count
+    @queue_oldest = queue_scope.group(:virtual_queue).minimum(:created_at)
+    @queue_next_retry = queue_scope.where.not(retry_after: nil).group(:virtual_queue).minimum(:retry_after)
+    @queue_max_attempts = queue_scope.group(:virtual_queue).maximum(:attempts)
+
+    queue_names = QueueConfiguration.enabled.order(:queue_name).pluck(:queue_name)
+    queue_names += @queue_totals.keys
+    @queue_names = queue_names.uniq.sort
+    @queue_configs = QueueConfiguration.enabled.where(queue_name: @queue_names).index_by(&:queue_name)
+    @backoff_rules = BackoffRule.enabled.order(:action, :pattern)
+  end
+
+  def set_queue_mode
+    queue_name = params[:queue_name].to_s
+    mode = params[:mode].to_s
+
+    unless QueueConfiguration::MODES.include?(mode)
+      return redirect_to [:queues, organization, @server], alert: "Invalid queue mode"
+    end
+
+    queue_config = QueueConfiguration.find_for_queue(queue_name)
+    unless queue_config
+      return redirect_to [:queues, organization, @server], alert: "Queue not found or not enabled"
+    end
+
+    mode == "backoff" ? queue_config.enter_backoff! : queue_config.exit_backoff!
+    redirect_to [:queues, organization, @server], notice: "Queue #{queue_name} is now in #{mode} mode"
   end
 
   def suspend

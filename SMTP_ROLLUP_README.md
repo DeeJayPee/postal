@@ -37,6 +37,7 @@ This feature adds three main capabilities to Postal:
 - `config/examples/mx_rollups.conf` - Example MX rollup configuration
 - `config/examples/domain_macros.conf` - Example domain macro configuration
 - `config/examples/queue_configs.conf` - Example queue configuration
+- `config/examples/backoff_rules.conf` - Global SMTP backoff rule configuration
 
 ### Documentation
 - `doc/smtp_rollup_guide.md` - Comprehensive user guide
@@ -61,6 +62,7 @@ bundle exec rails db:migrate
 cp config/examples/mx_rollups.conf config/
 cp config/examples/domain_macros.conf config/
 cp config/examples/queue_configs.conf config/
+cp config/examples/backoff_rules.conf config/
 
 # Import all configurations
 bundle exec rake postal:smtp_rollup:import_all
@@ -161,6 +163,7 @@ bundle exec rake postal:smtp_rollup:import_all
 bundle exec rake postal:smtp_rollup:import_mx_rollups[config/mx_rollups.conf]
 bundle exec rake postal:smtp_rollup:import_domain_macros[config/domain_macros.conf]
 bundle exec rake postal:smtp_rollup:import_queue_configs[config/queue_configs.conf]
+bundle exec rake postal:smtp_rollup:import_backoff_rules[config/backoff_rules.conf]
 ```
 
 ### Export Configurations
@@ -195,7 +198,16 @@ bundle exec rake postal:smtp_rollup:stats
 - `max_smtp_out` - Maximum concurrent SMTP connections
 - `max_rcpt_per_message` - Max recipients per message
 - `max_msg_rate` - Maximum message rate limit (e.g., 2000/h, 100/m, 10/s)
-- `backoff_reroute_to` - Alternative SMTP relay server (hostname or IP) for routing
+- `mode` - Queue mode (`normal` or `backoff`)
+- `backoff_base_delay_seconds` - Base retry delay used for backoff mode pacing
+- `backoff_auto_success_threshold` - Optional success threshold to auto-return to normal mode
+- `backoff_auto_success_window_seconds` - Optional success window for auto-return tracking
+- `backoff_reroute_to` - Alternative SMTP relay server (hostname or IP), used only in backoff mode
+- `enabled` - Active status
+
+### backoff_rules
+- `pattern` - Regex pattern matched against SMTP response text
+- `action` - `mode=backoff` or `bounce-rcpt`
 - `enabled` - Active status
 
 ### queued_messages (modified)
@@ -248,6 +260,7 @@ ORDER BY message_count DESC;
 ```sql
 SELECT * FROM queue_configurations WHERE enabled = 1;
 SELECT rollup_name, COUNT(*) FROM mx_rollups WHERE enabled = 1 GROUP BY rollup_name;
+SELECT action, COUNT(*) FROM backoff_rules WHERE enabled = 1 GROUP BY action;
 ```
 
 ## Use Cases

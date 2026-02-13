@@ -8,7 +8,8 @@ The SMTP rollup feature allows you to:
 
 1. **MX Rollups**: Group multiple MX hostnames into virtual queues
 2. **Domain Macros**: Group multiple domains into virtual queues
-3. **Queue Configurations**: Set SMTP connection limits and message limits per queue
+3. **Queue Configurations**: Set SMTP connection limits, rate limits, and backoff behavior per queue
+4. **Global Backoff Rules**: Match SMTP responses to trigger queue backoff mode or recipient bounce
 
 This is particularly useful for managing delivery to large ISPs and email providers that use multiple MX servers.
 
@@ -46,7 +47,9 @@ Queue configurations define the SMTP connection behavior for each virtual queue:
 - `max-smtp-out`: Maximum concurrent SMTP connections
 - `max-rcpt-per-message`: Maximum recipients per message
 - `max-msg-rate`: Maximum message rate limit (format: `number/unit` where unit is `d` for day, `h` for hour, `m` for minute, or `s` for second)
-- `backoff-reroute-to`: Alternative SMTP relay server (hostname or IP) to route messages through for this queue
+- `mode`: Queue mode (`normal` or `backoff`)
+- `backoff-base-delay`: Base delay for backoff mode retry spacing (default 2h)
+- `backoff-reroute-to`: Alternative SMTP relay server (hostname or IP), used only while queue is in `backoff` mode
 
 **Example:**
 ```
@@ -55,6 +58,8 @@ Queue configurations define the SMTP connection behavior for each virtual queue:
     max-smtp-out 1
     max-rcpt-per-message 100
     max-msg-rate 2000/h
+    mode normal
+    backoff-base-delay 2h
     backoff-reroute-to 192.168.1.100
 </domain>
 ```
@@ -75,11 +80,12 @@ bundle exec rails db:migrate
 
 ### 2. Import Configuration Files
 
-The rollup system uses three configuration files:
+The rollup system uses four configuration files:
 
 - `mx_rollups.conf` - MX hostname to rollup mappings
 - `domain_macros.conf` - Domain macro definitions
 - `queue_configs.conf` - Queue configuration settings
+- `backoff_rules.conf` - Global SMTP reply rules for queue backoff/bounce actions
 
 Example files are provided in `config/examples/`.
 
@@ -90,6 +96,7 @@ Example files are provided in `config/examples/`.
 cp config/examples/mx_rollups.conf config/
 cp config/examples/domain_macros.conf config/
 cp config/examples/queue_configs.conf config/
+cp config/examples/backoff_rules.conf config/
 
 # Import all configurations
 bundle exec rake postal:smtp_rollup:import_all
@@ -106,6 +113,9 @@ bundle exec rake postal:smtp_rollup:import_domain_macros[config/domain_macros.co
 
 # Import only queue configurations
 bundle exec rake postal:smtp_rollup:import_queue_configs[config/queue_configs.conf]
+
+# Import only global backoff rules
+bundle exec rake postal:smtp_rollup:import_backoff_rules[config/backoff_rules.conf]
 ```
 
 ## Configuration File Formats
@@ -145,6 +155,8 @@ domain-macro orange orange.fr,wanadoo.fr,orange.rollup
     max-smtp-out <number>
     max-rcpt-per-message <number>
     max-msg-rate <number>/<d|h|m|s>      # Optional
+    mode <normal|backoff>                # Optional
+    backoff-base-delay <number><d|h|m|s> # Optional
     backoff-reroute-to <ip_address>      # Optional
 </domain>
 ```
@@ -163,8 +175,19 @@ Example:
     max-smtp-out 1
     max-rcpt-per-message 50
     max-msg-rate 100/m
+    mode normal
+    backoff-base-delay 2h
     backoff-reroute-to 10.0.0.50
 </domain>
+```
+
+### Global Backoff Rules Format
+
+```
+<smtp-pattern-list blocking-errors>
+    reply /421 .* Please try again later/ mode=backoff
+    reply /OverQuotaTemp/ bounce-rcpt
+</smtp-pattern-list>
 ```
 
 ## How It Works
@@ -182,6 +205,12 @@ Example:
 4. **SMTP Sending**: When sending, Postal uses `SMTPSenderWithRollup` which respects the queue configuration limits:
    - Limits concurrent connections based on `max-smtp-out`
    - Respects recipient limits per message
+   - Defers and retries in queue when `max-msg-rate` threshold is hit
+   - Uses `backoff-reroute-to` only while queue mode is `backoff`
+
+5. **Backoff Rule Evaluation**: SMTP responses are checked against global rules:
+   - `mode=backoff` puts queue into backoff mode
+   - `bounce-rcpt` treats the recipient/message as permanent failure
 
 ### Priority Order
 
@@ -198,7 +227,7 @@ bundle exec rake postal:smtp_rollup:stats
 ```
 
 This shows:
-- Total number of MX rollups, domain macros, and queue configurations
+- Total number of MX rollups, domain macros, queue configurations, and backoff rules
 - Breakdown of rollup groups
 
 ### Export Current Configuration
@@ -225,6 +254,8 @@ Limit concurrent connections and message rates to specific ISPs:
 ```
 
 This limits Orange to 1 concurrent connection and 2000 messages per hour.
+When the rate is exceeded, messages are deferred and retried later from queue.
+If the queue enters `backoff` mode, it can use the configured `backoff-reroute-to` relay.
 
 ### 2. Grouping Related Domains
 
@@ -264,8 +295,17 @@ mx apc.olc.protection.outlook.com outlook-apc.rollup
 - `max_smtp_out`: Maximum concurrent connections
 - `max_rcpt_per_message`: Max recipients per message
 - `max_msg_rate`: Message rate limit (e.g., "2000/h", "100/m", "10/s")
-- `backoff_reroute_to`: IP address for backoff/throttling
+- `mode`: Queue mode (`normal` or `backoff`)
+- `backoff_base_delay_seconds`: Base retry delay for backoff pacing
+- `backoff_auto_success_threshold`: Success count to auto-return to normal mode
+- `backoff_auto_success_window_seconds`: Time window for auto-return success count
+- `backoff_reroute_to`: Relay host/IP used only in backoff mode
 - `enabled`: Whether this configuration is active
+
+### backoff_rules Table
+- `pattern`: Regex pattern matched against SMTP response
+- `action`: `mode=backoff` or `bounce-rcpt`
+- `enabled`: Whether the rule is active
 
 ### queued_messages Table (Modified)
 - `virtual_queue`: The virtual queue name (new field)

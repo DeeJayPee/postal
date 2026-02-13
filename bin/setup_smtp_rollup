@@ -22,7 +22,8 @@ examples_dir = "config/examples"
 config_files = {
   "mx_rollups.conf" => "MX Rollup Configuration",
   "domain_macros.conf" => "Domain Macro Configuration",
-  "queue_configs.conf" => "Queue Configuration"
+  "queue_configs.conf" => "Queue Configuration",
+  "backoff_rules.conf" => "Global Backoff Rules"
 }
 
 puts "Step 1: Copying example configuration files..."
@@ -82,6 +83,7 @@ puts "1. Review and customize the configuration files in config/:"
 puts "   - config/mx_rollups.conf"
 puts "   - config/domain_macros.conf"
 puts "   - config/queue_configs.conf"
+puts "   - config/backoff_rules.conf"
 puts ""
 puts "2. Import your custom configurations:"
 puts "   bundle exec rake postal:smtp_rollup:import_all"
