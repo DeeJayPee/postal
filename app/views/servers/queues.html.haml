@@ -46,11 +46,9 @@
             - oldest = @queue_oldest[queue_name]
             - next_retry = @queue_next_retry[queue_name]
             - max_attempts = @queue_max_attempts[queue_name]
-            - auto_return = if config&.backoff_auto_success_threshold.present? && config&.backoff_auto_success_window_seconds.present?
-                "#{config.backoff_auto_success_threshold} in #{distance_of_time_in_words(Time.current, Time.current + config.backoff_auto_success_window_seconds)}"
-              else
-                "manual"
-              end
+            - auto_return = "manual"
+            - if config&.backoff_auto_success_threshold.present? && config&.backoff_auto_success_window_seconds.present?
+              - auto_return = "#{config.backoff_auto_success_threshold} in #{distance_of_time_in_words(Time.current, Time.current + config.backoff_auto_success_window_seconds)}"
             %tr
               %td= queue_name
               %td= config&.mode || "unconfigured"
