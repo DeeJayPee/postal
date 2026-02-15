@@ -1,0 +1,70 @@
+- page_title << "Admin"
+- page_title << "Global Queues"
+
+.pageHeader
+  %h1.pageHeader__title Global Queue Configuration
+
+.pageContent
+  %p.pageContent__intro.u-margin
+    Queue configuration and backoff rules are global across all organizations and servers.
+
+  .u-margin
+    %h2.pageContent__subTitle Queue configurations
+    - if @queue_configs.empty?
+      %p.pageContent__text No enabled queue configurations found.
+    - else
+      %table.dataTable.u-margin-half
+        %thead
+          %tr
+            %td Queue
+            %td Mode
+            %td Max Msg Rate
+            %td SMTP Out
+            %td Max Rcpt
+            %td Backoff Relay
+            %td Backoff Delay
+            %td Auto Return
+            %td Action
+        %tbody
+          - @queue_configs.each do |config|
+            - auto_return = "manual"
+            - if config.backoff_auto_success_threshold.present? && config.backoff_auto_success_window_seconds.present?
+              - auto_return = "#{config.backoff_auto_success_threshold} in #{distance_of_time_in_words(Time.current, Time.current + config.backoff_auto_success_window_seconds)}"
+            %tr
+              %td= config.queue_name
+              %td= config.mode
+              %td= config.max_msg_rate || "-"
+              %td= "#{config.min_smtp_out}-#{config.max_smtp_out}"
+              %td= config.max_rcpt_per_message || "-"
+              %td= config.backoff_reroute_to || "-"
+              %td
+                - if config.backoff_base_delay_seconds.present?
+                  = distance_of_time_in_words(Time.current, Time.current + config.backoff_base_delay_seconds)
+                - else
+                  = "-"
+              %td= auto_return
+              %td
+                - target_mode = config.backoff? ? "normal" : "backoff"
+                - label = config.backoff? ? "Set normal" : "Set backoff"
+                = button_to label,
+                            admin_set_queue_mode_path(queue_name: config.queue_name, mode: target_mode),
+                            method: :post,
+                            class: ["button", (config.backoff? ? "button--positive" : "button--danger")]
+
+  .u-margin
+    %h2.pageContent__subTitle Loaded global backoff rules
+    - if @backoff_rules.empty?
+      %p.pageContent__text No backoff rules loaded.
+    - else
+      %table.dataTable.u-margin-half
+        %thead
+          %tr
+            %td Action
+            %td Pattern
+            %td Source List
+        %tbody
+          - @backoff_rules.each do |rule|
+            %tr
+              %td= rule.action
+              %td= "/#{rule.pattern}/"
+              %td= rule.description.presence || "-"

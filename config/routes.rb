@@ -61,7 +61,6 @@ Rails.application.routes.draw do
       get :retention, on: :member
       get :queue, on: :member
       get :queues, on: :member
-      post :set_queue_mode, on: :member
       get :spam, on: :member
       get :delete, on: :member
       get "help/outgoing" => "help#outgoing"
@@ -87,6 +86,8 @@ Rails.application.routes.draw do
   resources :ip_pools do
     resources :ip_addresses
   end
+  get "admin/queues" => "admin_queues#index", as: :admin_queues
+  post "admin/queues/set_mode" => "admin_queues#set_mode", as: :admin_set_queue_mode
 
   get "settings" => "user#edit"
   patch "settings" => "user#update"

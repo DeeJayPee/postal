@@ -42,6 +42,7 @@
           - if current_user.admin?
             - if Postal.ip_pools?
               %li.siteHeader__navItem= link_to "IP Pools", ip_pools_path, :class => 'sideHeader__navItemLink'
+            %li.siteHeader__navItem= link_to "Global Queues", admin_queues_path, :class => 'sideHeader__navItemLink'
             %li.siteHeader__navItem= link_to "Users", users_path, :class => 'sideHeader__navItemLink'
           %li.siteHeader__navItem= link_to "Logout", logout_path, :method => :delete, :class => 'sideHeader__navItemLink'
 
