@@ -23,6 +23,19 @@ RSpec.describe QueueConfiguration do
     end
   end
 
+  describe "#enter_backoff!" do
+    it "makes scheduled unlocked messages immediately eligible when a relay is configured" do
+      queue.update!(backoff_reroute_to: "relay.example.test")
+      scheduled = create(:queued_message, virtual_queue: queue.queue_name, retry_after: 1.hour.from_now)
+      locked = create(:queued_message, :locked, virtual_queue: queue.queue_name, retry_after: 1.hour.from_now)
+
+      queue.enter_backoff!
+
+      expect(scheduled.reload.retry_after).to be_nil
+      expect(locked.reload.retry_after).to be_present
+    end
+  end
+
   describe "#register_backoff_success!" do
     it "auto-exits backoff when threshold is reached in the window" do
       queue.update!(

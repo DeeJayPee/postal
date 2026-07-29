@@ -399,6 +399,25 @@ module MessageDequeuer
         end
       end
 
+      context "when the queued message has a virtual queue assignment" do
+        let(:queued_message) do
+          create(:queued_message, :locked, message: message, virtual_queue: "example.queue")
+        end
+
+        it "passes the stored queue assignment to the rollup sender" do
+          mocked_sender = double("SMTPSenderWithRollup")
+          expect(mocked_sender).to receive(:send_message).with(queued_message.message).and_return(send_result)
+          expect(state).to receive(:sender_for).with(
+            SMTPSenderWithRollup,
+            message.recipient_domain,
+            nil,
+            queue_name: "example.queue"
+          ).and_return(mocked_sender)
+
+          processor.process
+        end
+      end
+
       context "when the message hard fails" do
         before do
           send_result.type = "HardFail"

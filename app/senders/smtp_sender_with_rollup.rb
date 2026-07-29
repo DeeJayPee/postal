@@ -6,10 +6,11 @@ class SMTPSenderWithRollup < SMTPSender
 
   attr_reader :queue_config, :virtual_queue_name
 
-  def initialize(domain, source_ip_address = nil, servers: nil, log_id: nil, rcpt_to: nil)
-    # Resolve virtual queue configuration
-    @virtual_queue_name = SMTPRollupService.resolve_virtual_queue(domain)
-    @queue_config = SMTPRollupService.queue_configuration_for_domain(domain) if @virtual_queue_name
+  def initialize(domain, source_ip_address = nil, servers: nil, log_id: nil, rcpt_to: nil, queue_name: nil)
+    # A queued message's stored assignment is authoritative. DNS is only used
+    # when a sender is created outside the queue processor.
+    @virtual_queue_name = queue_name.presence || SMTPRollupService.resolve_virtual_queue(domain)
+    @queue_config = QueueConfiguration.find_for_queue(@virtual_queue_name) if @virtual_queue_name
     @use_backoff_relay = false  # Track if we should use backoff relay
 
     super(domain, source_ip_address, servers: servers, log_id: log_id, rcpt_to: rcpt_to)

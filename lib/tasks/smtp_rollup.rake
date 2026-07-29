@@ -328,7 +328,7 @@ namespace :postal do
       end
     end
 
-    desc "Probe SMTP without DATA. Usage: rake 'postal:smtp_rollup:probe_smtp[user@example.net,queue.name,from@example.org]'"
+    desc "Send a real diagnostic email. Usage: rake 'postal:smtp_rollup:probe_smtp[user@example.net,queue.name,from@example.org]'"
     task :probe_smtp, [:recipient, :queue_name, :mail_from] => :environment do |_t, args|
       probe = SMTPConnectionProbe.new(
         recipient: args[:recipient],
@@ -338,7 +338,46 @@ namespace :postal do
 
       puts probe.summary
       puts probe.transcript
-      exit 1 unless probe.connected
+      exit 1 unless probe.recipient_accepted
+    end
+
+    desc "Make scheduled messages eligible now. Usage: rake 'postal:smtp_rollup:retry_queue_now[queue.name]'"
+    task :retry_queue_now, [:queue_name] => :environment do |_t, args|
+      queue = QueueConfiguration.find_for_queue(args[:queue_name].to_s)
+      unless queue
+        puts "Queue not found or disabled: #{args[:queue_name]}"
+        exit 1
+      end
+
+      messages = QueuedMessage.where(virtual_queue: queue.queue_name, locked_at: nil)
+                              .where("retry_after IS NOT NULL AND retry_after >= ?", 30.seconds.ago)
+      count = messages.count
+      messages.update_all(retry_after: nil)
+      puts "✓ #{count} message(s) in #{queue.queue_name} are eligible for the next worker run"
+    end
+
+    desc "Reclassify pending Rest messages using current queue mappings"
+    task refresh_queue_assignments: :environment do
+      enabled_queue_names = QueueConfiguration.enabled.pluck(:queue_name)
+      after_id = 0
+      scanned = 0
+      updated = 0
+      errors = 0
+
+      loop do
+        result = VirtualQueueReclassifier.new(
+          enabled_queue_names: enabled_queue_names,
+          after_id: after_id
+        ).call
+        scanned += result.scanned
+        updated += result.updated
+        errors += result.errors
+        break unless result.more
+
+        after_id = result.next_after_id
+      end
+
+      puts "✓ Scanned #{scanned} pending message(s); assigned #{updated}; errors #{errors}"
     end
 
     desc "Set queue mode (normal|backoff). Usage: rake postal:smtp_rollup:set_queue_mode[queue,mode]"

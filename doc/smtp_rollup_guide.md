@@ -227,6 +227,24 @@ creating and editing queue settings and MX mappings; queue names are immutable
 after creation. The same changes can be made from a shell without editing an
 import file:
 
+Runtime counts on that page are a timestamped snapshot. “Ready” means an
+unlocked message is eligible for the next worker poll, “Scheduled” means its
+retry time has not arrived, and “Locked” means a worker is processing it.
+Use **Retry now** to make scheduled messages in one queue eligible immediately.
+When a queue enters backoff with a relay configured, scheduled unlocked messages
+are released automatically and routed to that relay.
+
+Mappings added after messages were enqueued are not present on those older rows.
+Use **Refresh pending queue assignments** to resolve their current recipient MX
+records and reclassify them in batches.
+
+The equivalent shell commands are:
+
+```bash
+bundle exec rake 'postal:smtp_rollup:retry_queue_now[ovh.queue]'
+bundle exec rake postal:smtp_rollup:refresh_queue_assignments
+```
+
 ```bash
 # Add or update a queue:
 bundle exec rake 'postal:smtp_rollup:add_queue[orange.queue,1,3,100,2000/h]'
@@ -245,9 +263,9 @@ To perform the same non-delivery SMTP diagnostic as the admin page:
 bundle exec rake 'postal:smtp_rollup:probe_smtp[user@orange.fr,orange.queue,probe@example.org]'
 ```
 
-The probe prints the SMTP transcript and stops before `DATA`, so it does not send
-a message. The queue and MAIL FROM arguments are optional; use empty positions
-when only automatic queue resolution is wanted.
+The probe sends a real diagnostic message, prints the complete SMTP transcript,
+and exits unsuccessfully if the remote server does not accept it. Queue and
+MAIL FROM are required.
 
 ### View Statistics
 

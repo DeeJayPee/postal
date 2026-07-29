@@ -10,10 +10,11 @@ RSpec.describe SMTPConnectionProbe do
     let(:endpoint) { instance_double(SMTPClient::Endpoint, server: server, to_s: "192.0.2.1:25 (mx.example.net)") }
     let(:smtp) { instance_double(Net::SMTP) }
     let(:response) { instance_double(Net::SMTP::Response, string: "250 2.1.5 OK") }
+    let(:queue_config) { instance_double(QueueConfiguration, backoff_relay_server: nil) }
 
     before do
       allow(SMTPRollupService).to receive(:resolve_virtual_queue).with("example.net").and_return("example.queue")
-      allow(QueueConfiguration).to receive(:find_for_queue).with("example.queue").and_return(nil)
+      allow(QueueConfiguration).to receive(:find_for_queue).with("example.queue").and_return(queue_config)
       allow(SMTPSender).to receive(:smtp_relays).and_return(nil)
       allow(DNSResolver).to receive(:local).and_return(resolver)
       allow(resolver).to receive(:mx).with("example.net", raise_timeout_errors: true).and_return([[10, "mx.example.net"]])
@@ -25,27 +26,34 @@ RSpec.describe SMTPConnectionProbe do
       end
       allow(endpoint).to receive(:reset_smtp_session)
       allow(endpoint).to receive(:finish_smtp_session)
-      allow(smtp).to receive(:mailfrom).with("")
-      allow(smtp).to receive(:rcptto).with("user@example.net").and_return(response)
-      allow(smtp).to receive(:send_message)
+      allow(smtp).to receive(:send_message).and_return(response)
     end
 
-    it "captures a successful SMTP envelope probe without sending DATA" do
+    it "sends a real diagnostic message and captures the SMTP response" do
       result = described_class.new(
         recipient: "user@example.net",
-        queue_name: "example.queue"
+        queue_name: "example.queue",
+        mail_from: "sender@example.org"
       ).call
 
       expect(result.connected).to be(true)
       expect(result.recipient_accepted).to be(true)
       expect(result.resolved_queue).to eq("example.queue")
       expect(result.transcript).to include("220 mx.example.net ESMTP")
-      expect(smtp).not_to have_received(:send_message)
+      expect(smtp).to have_received(:send_message).with(
+        include("Postal queue diagnostic for example.queue"),
+        "sender@example.org",
+        ["user@example.net"]
+      )
       expect(endpoint).to have_received(:reset_smtp_session)
     end
 
     it "rejects an invalid recipient before DNS or SMTP work" do
-      result = described_class.new(recipient: "not-an-address").call
+      result = described_class.new(
+        recipient: "not-an-address",
+        queue_name: "example.queue",
+        mail_from: "sender@example.org"
+      ).call
 
       expect(result.connected).to be(false)
       expect(result.summary).to match(/recipient address/i)
@@ -53,9 +61,13 @@ RSpec.describe SMTPConnectionProbe do
     end
 
     it "returns the remote SMTP rejection and still reports a successful connection" do
-      allow(smtp).to receive(:rcptto).and_raise(Net::SMTPFatalError, "550 5.1.1 User unknown")
+      allow(smtp).to receive(:send_message).and_raise(Net::SMTPFatalError, "550 5.1.1 User unknown")
 
-      result = described_class.new(recipient: "user@example.net").call
+      result = described_class.new(
+        recipient: "user@example.net",
+        queue_name: "example.queue",
+        mail_from: "sender@example.org"
+      ).call
 
       expect(result.connected).to be(true)
       expect(result.recipient_accepted).to be(false)

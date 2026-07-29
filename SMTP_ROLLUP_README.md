@@ -157,6 +157,17 @@ Administrators can create and edit queues and MX mappings, inspect runtime sizes
 and run SMTP probes at `/admin/queues`. Queue names remain fixed after creation
 so existing mappings and queued messages keep their references.
 
+The queue table separates messages that are ready for a worker, scheduled for a
+later retry, and currently locked for delivery. **Retry now** clears the schedule
+for unlocked messages in one queue. Entering backoff with a configured relay does
+the same automatically so eligible traffic is rerouted without waiting for the
+normal backoff delay.
+
+MX mappings are stored on a message when it enters the queue. After adding or
+changing a mapping, use **Refresh pending queue assignments** to reclassify
+messages that were already in “Rest.” The operation is cursor-batched in groups
+of 1,000.
+
 ### Add a Queue or MX Rollup
 
 ```bash
@@ -164,7 +175,7 @@ bundle exec rake 'postal:smtp_rollup:add_queue[orange.queue,1,3,100,2000/h]'
 bundle exec rake 'postal:smtp_rollup:add_mx_rollup[smtp-in.orange.fr,orange.queue]'
 ```
 
-Run a non-delivery SMTP envelope probe and print the full transcript:
+Send a real diagnostic email and print the full SMTP transcript:
 
 ```bash
 bundle exec rake 'postal:smtp_rollup:probe_smtp[user@orange.fr,orange.queue,probe@example.org]'
@@ -366,7 +377,7 @@ For issues or questions:
 ## Future Enhancements
 
 Potential future improvements:
-- Edit and disable existing rollups from the web UI
+- Disable existing queues and rollups from the web UI
 - Real-time queue statistics dashboard
 - Automatic MX rollup discovery
 - Rate limiting per queue

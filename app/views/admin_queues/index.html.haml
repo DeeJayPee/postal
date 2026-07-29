@@ -13,6 +13,15 @@
       %dt Global queue size
       %dd= number_with_delimiter(@global_queue_size)
     .adminStats__stat
+      %dt Ready now
+      %dd= number_with_delimiter(@global_runtime[:ready])
+    .adminStats__stat
+      %dt Scheduled
+      %dd= number_with_delimiter(@global_runtime[:scheduled])
+    .adminStats__stat
+      %dt Sending / locked
+      %dd= number_with_delimiter(@global_runtime[:locked])
+    .adminStats__stat
       %dt In rollups / queues
       %dd= number_with_delimiter(@known_queue_size)
     .adminStats__stat
@@ -21,6 +30,24 @@
 
   %p.pageContent__text.u-margin
     “Rest” contains every queued message whose virtual queue is blank, disabled, or no longer matches an enabled queue, MX rollup, or domain macro.
+    Counts are a snapshot from
+    = succeed "." do
+      %strong= @queue_snapshot_at.to_fs(:long)
+    = link_to "Refresh now", admin_queues_path, class: "u-link"
+    Rest currently has
+    = succeed " ready," do
+      %strong= number_with_delimiter(@rest_runtime[:ready])
+    = succeed " scheduled, and" do
+      %strong= number_with_delimiter(@rest_runtime[:scheduled])
+    = succeed " locked." do
+      %strong= number_with_delimiter(@rest_runtime[:locked])
+
+  .buttonSet.u-margin
+    = button_to "Refresh pending queue assignments",
+                admin_refresh_queue_assignments_path(after_id: @reclassify_after),
+                method: :post,
+                class: "button button--small button--dark",
+                data: { confirm: "Resolve current recipient MX records and reclassify up to 1,000 pending messages?" }
 
   .u-margin#queue-configurations
     %h2.pageContent__subTitle Queue configurations
@@ -31,7 +58,11 @@
         %thead
           %tr
             %td Queue
-            %td Size
+            %td Total
+            %td Ready
+            %td Scheduled
+            %td Locked
+            %td Next attempt
             %td Mode
             %td Max Msg Rate
             %td SMTP Out
@@ -42,12 +73,17 @@
             %td Action
         %tbody
           - @queue_configs.each do |config|
+            - runtime = @queue_runtime.fetch(config.queue_name)
             - auto_return = "manual"
             - if config.backoff_auto_success_threshold.present? && config.backoff_auto_success_window_seconds.present?
               - auto_return = "#{config.backoff_auto_success_threshold} in #{distance_of_time_in_words(Time.current, Time.current + config.backoff_auto_success_window_seconds)}"
             %tr
               %td= config.queue_name
-              %td= number_with_delimiter(@queue_sizes[config.queue_name].to_i)
+              %td= number_with_delimiter(runtime[:total])
+              %td= number_with_delimiter(runtime[:ready])
+              %td= number_with_delimiter(runtime[:scheduled])
+              %td= number_with_delimiter(runtime[:locked])
+              %td= runtime[:next_attempt_at] ? runtime[:next_attempt_at].to_fs(:short) : "-"
               %td= config.mode
               %td= config.max_msg_rate || "-"
               %td= "#{config.min_smtp_out}-#{config.max_smtp_out}"
@@ -68,6 +104,11 @@
                               admin_set_queue_mode_path(queue_name: config.queue_name, mode: target_mode),
                               method: :post,
                               class: ["button", "button--small", (config.backoff? ? "button--positive" : "button--danger")]
+                  = button_to "Retry now",
+                              admin_retry_queue_path(queue_name: config.queue_name),
+                              method: :post,
+                              class: "button button--small button--dark",
+                              data: { confirm: "Make every unlocked message in #{config.queue_name} eligible for the next worker run?" }
 
   .row.row--2col.u-margin
     .col.col--10.col--collapse
@@ -107,9 +148,10 @@
               %td= link_to "Edit", admin_edit_rollup_path(rollup), class: "button button--small"
 
   .u-margin
-    %h2.pageContent__subTitle Force an SMTP connection
+    %h2.pageContent__subTitle Deliver a real diagnostic email
     %p.pageContent__text.u-margin-half
-      Opens an SMTP session from this Postal host, runs EHLO/STARTTLS and the envelope commands, captures the remote response, then stops before DATA. No email is sent.
+      Sends a real email, including DATA, from this Postal host using the selected queue's normal route or its backoff relay.
+      The complete SMTP response is displayed. A successful delivery returns a backoff queue to normal mode.
     = form_with url: admin_smtp_probe_path, scope: :smtp_probe, local: true do |f|
       %fieldset.fieldSet.fieldSet--compact.u-margin-half
         .fieldSet__fieldPair
@@ -117,16 +159,17 @@
             = f.label :recipient, "Recipient to test", class: "fieldSet__label"
             .fieldSet__input= f.email_field :recipient, value: @smtp_probe_values[:recipient], class: "input input--text", placeholder: "user@example.net", required: true
           .fieldSet__field
-            = f.label :queue_name, "Queue override", class: "fieldSet__label"
+            = f.label :queue_name, "Queue", class: "fieldSet__label"
             .fieldSet__input
               = f.select :queue_name,
                          options_for_select(@queue_configs.map { |queue| [queue.queue_name, queue.queue_name] }, @smtp_probe_values[:queue_name]),
-                         { include_blank: "Resolve automatically" },
-                         class: "input input--select"
+                         { include_blank: "Select a queue" },
+                         class: "input input--select",
+                         required: true
         .fieldSet__field
-          = f.label :mail_from, "MAIL FROM (optional)", class: "fieldSet__label"
-          .fieldSet__input= f.email_field :mail_from, value: @smtp_probe_values[:mail_from], class: "input input--text", placeholder: "Empty envelope sender"
-      = f.submit "Connect and capture SMTP response", class: "button button--dark"
+          = f.label :mail_from, "MAIL FROM", class: "fieldSet__label"
+          .fieldSet__input= f.email_field :mail_from, value: @smtp_probe_values[:mail_from], class: "input input--text", placeholder: "sender@example.com", required: true
+      = f.submit "Send diagnostic email", class: "button button--dark", data: { confirm: "This sends a real email to the recipient. Continue?" }
 
     - if @smtp_probe_result
       .u-margin
@@ -134,6 +177,8 @@
         %p{class: probe_result_class}= @smtp_probe_result.summary
         - if @smtp_probe_result.endpoint
           %p.pageContent__text= "Endpoint: #{@smtp_probe_result.endpoint}"
+        - if @smtp_probe_recovered_queue
+          %p.u-green.u-bold= "#{@smtp_probe_recovered_queue} returned to normal mode after the successful delivery."
         %pre.codeBlock.codeBlock--whitespace= @smtp_probe_result.transcript
 
   .u-margin

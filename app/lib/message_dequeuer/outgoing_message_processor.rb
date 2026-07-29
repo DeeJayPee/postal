@@ -140,7 +140,8 @@ module MessageDequeuer
 
       sender = @state.sender_for(sender_class,
                                  queued_message.message.recipient_domain,
-                                 queued_message.ip_address)
+                                 queued_message.ip_address,
+                                 **sender_options)
 
       @result = sender.send_message(queued_message.message)
       apply_backoff_rule_to_sender_result
@@ -148,6 +149,12 @@ module MessageDequeuer
       return unless @result.connect_error
 
       @state.send_result = @result
+    end
+
+    def sender_options
+      return {} if queued_message.virtual_queue.blank?
+
+      { queue_name: queued_message.virtual_queue }
     end
 
     def apply_backoff_rule_to_sender_result
@@ -167,7 +174,11 @@ module MessageDequeuer
       when BackoffRule::ACTION_MODE_BACKOFF
         queue_config.enter_backoff! unless queue_config.backoff?
         queue_config.register_backoff_failure!
-        @result.retry = queued_message.calculate_retry_time(queued_message.attempts, queue_config.effective_backoff_base_delay).to_i
+        @result.retry = if queue_config.backoff_relay_server
+                          1
+                        else
+                          queued_message.calculate_retry_time(queued_message.attempts, queue_config.effective_backoff_base_delay).to_i
+                        end
       when BackoffRule::ACTION_BOUNCE_RCPT
         @result.type = "HardFail"
         @result.retry = nil
@@ -224,7 +235,7 @@ module MessageDequeuer
         retry_seconds = @result.retry.is_a?(Integer) ? @result.retry : nil
         queue_config = queued_message.virtual_queue.present? ? QueueConfiguration.find_for_queue(queued_message.virtual_queue) : nil
 
-        if queue_config&.backoff?
+        if queue_config&.backoff? && queue_config.backoff_relay_server.nil?
           backoff_retry_seconds = queued_message.calculate_retry_time(queued_message.attempts, queue_config.effective_backoff_base_delay).to_i
           retry_seconds = retry_seconds.nil? ? backoff_retry_seconds : [retry_seconds, backoff_retry_seconds].max
         end

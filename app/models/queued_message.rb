@@ -50,6 +50,50 @@ class QueuedMessage < ApplicationRecord
     }
   end
 
+  def self.runtime_summary(scope = all)
+    total = scope.count
+    locked = scope.where.not(locked_at: nil).count
+    ready_scope = scope.where(locked_at: nil).ready_with_delayed_retry
+    ready = ready_scope.count
+    scheduled_scope = scope.where(locked_at: nil)
+                           .where("retry_after IS NOT NULL AND retry_after >= ?", 30.seconds.ago)
+
+    {
+      total: total,
+      ready: ready,
+      scheduled: scheduled_scope.count,
+      locked: locked,
+      next_attempt_at: scheduled_scope.minimum(:retry_after)
+    }
+  end
+
+  def self.runtime_by_virtual_queue(queue_names)
+    scope = where(virtual_queue: queue_names)
+    totals = scope.group(:virtual_queue).count
+    locked = scope.where.not(locked_at: nil).group(:virtual_queue).count
+    ready = scope.where(locked_at: nil).ready_with_delayed_retry.group(:virtual_queue).count
+    scheduled_scope = scope.where(locked_at: nil)
+                           .where("retry_after IS NOT NULL AND retry_after >= ?", 30.seconds.ago)
+    scheduled = scheduled_scope.group(:virtual_queue).count
+    next_attempts = scheduled_scope.group(:virtual_queue).minimum(:retry_after)
+
+    queue_names.index_with do |queue_name|
+      {
+        total: totals[queue_name].to_i,
+        ready: ready[queue_name].to_i,
+        scheduled: scheduled[queue_name].to_i,
+        locked: locked[queue_name].to_i,
+        next_attempt_at: next_attempts[queue_name]
+      }
+    end
+  end
+
+  def self.outside_virtual_queues(queue_names)
+    return all if queue_names.empty?
+
+    where(virtual_queue: [nil, ""]).or(where.not(virtual_queue: queue_names))
+  end
+
   def retry_now
     update!(retry_after: nil)
   end

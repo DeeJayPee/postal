@@ -62,12 +62,20 @@ class QueueConfiguration < ApplicationRecord
   end
 
   def enter_backoff!
-    update!(
-      mode: "backoff",
-      backoff_started_at: Time.current,
-      backoff_last_success_at: nil,
-      backoff_success_count: 0
-    )
+    transaction do
+      update!(
+        mode: "backoff",
+        backoff_started_at: Time.current,
+        backoff_last_success_at: nil,
+        backoff_success_count: 0
+      )
+
+      if backoff_reroute_to.present?
+        QueuedMessage.where(virtual_queue: queue_name, locked_at: nil)
+                     .where("retry_after IS NOT NULL AND retry_after >= ?", 30.seconds.ago)
+                     .update_all(retry_after: nil)
+      end
+    end
   end
 
   def exit_backoff!

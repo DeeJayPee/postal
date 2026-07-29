@@ -3,8 +3,8 @@
 require "ipaddr"
 require "stringio"
 
-# Opens a real SMTP session for an administrator, captures the protocol
-# transcript, and stops before DATA so the probe can never deliver a message.
+# Sends a real diagnostic message through a selected queue and captures the
+# complete SMTP protocol transcript for an administrator.
 class SMTPConnectionProbe
 
   MAX_TRANSCRIPT_BYTES = 64.kilobytes
@@ -29,17 +29,20 @@ class SMTPConnectionProbe
   end
 
   def call
+    return invalid_result("Select an enabled queue to test.") unless @requested_queue
     return invalid_result("Enter a recipient address in the form user@example.com.") unless valid_address?(@recipient)
-    return invalid_result("Enter a valid MAIL FROM address, or leave it blank for an empty envelope sender.") unless @mail_from.blank? || valid_address?(@mail_from)
+    return invalid_result("Enter a MAIL FROM address in the form sender@example.com.") unless valid_address?(@mail_from)
 
     domain = @recipient.split("@", 2).last.downcase
     resolved_queue = SMTPRollupService.resolve_virtual_queue(domain)
-    queue_config = requested_queue_config(resolved_queue)
+    queue_config = QueueConfiguration.find_for_queue(@requested_queue)
+    return invalid_result("The selected queue is not enabled.") unless queue_config
+
     servers, route_description = servers_for(domain, queue_config)
 
     append_line("Recipient domain: #{domain}")
     append_line("Resolved virtual queue: #{resolved_queue || '(rest)'}")
-    append_line("Requested queue: #{@requested_queue || '(automatic)'}")
+    append_line("Selected queue: #{@requested_queue}")
     append_line("Route: #{route_description}")
 
     if @requested_queue && resolved_queue != @requested_queue
@@ -65,13 +68,6 @@ class SMTPConnectionProbe
   end
 
   private
-
-  def requested_queue_config(resolved_queue)
-    queue_name = @requested_queue || resolved_queue
-    return nil unless queue_name
-
-    QueueConfiguration.find_for_queue(queue_name)
-  end
 
   def servers_for(domain, queue_config)
     if queue_config&.backoff_relay_server
@@ -107,13 +103,12 @@ class SMTPConnectionProbe
       smtp = endpoint.start_smtp_session(allow_ssl: false, debug_output: @transcript)
     end
 
-    smtp.mailfrom(@mail_from)
-    response = smtp.rcptto(@recipient)
-    append_line("RCPT accepted: #{response.string.to_s.strip}")
-    result(true, true, "SMTP connection succeeded and the recipient was accepted.", domain, resolved_queue, endpoint)
+    response = smtp.send_message(diagnostic_message, @mail_from, [@recipient])
+    append_line("Message accepted: #{response.string.to_s.strip}")
+    result(true, true, "The diagnostic email was accepted for delivery.", domain, resolved_queue, endpoint)
   rescue Net::SMTPError => e
     append_line("#{e.class}: #{e.message}")
-    result(true, false, "SMTP connected, but the envelope command was rejected: #{e.message}", domain, resolved_queue, endpoint)
+    result(true, false, "SMTP connected, but the diagnostic email was rejected: #{e.message}", domain, resolved_queue, endpoint)
   rescue StandardError => e
     append_line("#{e.class}: #{e.message}")
     nil
@@ -152,6 +147,17 @@ class SMTPConnectionProbe
 
   def valid_address?(address)
     address.match?(/\A[^@\s]+@[^@\s]+\.[^@\s]+\z/)
+  end
+
+  def diagnostic_message
+    message = Mail.new
+    message.from = @mail_from
+    message.to = @recipient
+    message.subject = "Postal queue diagnostic for #{@requested_queue}"
+    message.date = Time.current
+    message.message_id = "<#{SecureRandom.uuid}@#{@mail_from.split('@', 2).last}>"
+    message.body = "This is a real delivery diagnostic sent by Postal for queue #{@requested_queue} at #{Time.current.utc.iso8601}."
+    message.to_s
   end
 
   def ip_address?(hostname)

@@ -79,8 +79,46 @@ class AdminQueuesController < ApplicationController
     probe_params = params.require(:smtp_probe).permit(:recipient, :queue_name, :mail_from)
     @smtp_probe_values = probe_params.to_h.symbolize_keys
     @smtp_probe_result = SMTPConnectionProbe.new(**@smtp_probe_values).call
+
+    queue_config = QueueConfiguration.find_for_queue(@smtp_probe_values[:queue_name])
+    if @smtp_probe_result.recipient_accepted && queue_config&.backoff?
+      queue_config.exit_backoff!
+      @smtp_probe_recovered_queue = queue_config.queue_name
+    end
+
     load_index_data
     render :index
+  end
+
+  def retry_queue
+    queue_config = QueueConfiguration.find_for_queue(params[:queue_name].to_s)
+    unless queue_config
+      return redirect_to admin_queues_path, alert: "Queue not found or not enabled"
+    end
+
+    scheduled_messages = QueuedMessage.where(virtual_queue: queue_config.queue_name, locked_at: nil)
+                                      .where("retry_after IS NOT NULL AND retry_after >= ?", 30.seconds.ago)
+    scheduled_count = scheduled_messages.count
+    scheduled_messages.update_all(retry_after: nil)
+
+    redirect_to admin_queues_path(anchor: "queue-configurations"),
+                notice: "#{scheduled_count} message(s) in #{queue_config.queue_name} are eligible for the next worker run."
+  end
+
+  def refresh_queue_assignments
+    enabled_queue_names = QueueConfiguration.enabled.pluck(:queue_name)
+    refresh_result = VirtualQueueReclassifier.new(
+      enabled_queue_names: enabled_queue_names,
+      after_id: params[:after_id]
+    ).call
+
+    redirect_params = { anchor: "queue-configurations" }
+    redirect_params[:reclassify_after] = refresh_result.next_after_id if refresh_result.more
+    notice = "Scanned #{refresh_result.scanned} pending message(s); assigned #{refresh_result.updated} to enabled queues."
+    notice += " #{refresh_result.errors} error(s) were logged." if refresh_result.errors.positive?
+    notice += " Click refresh assignments again to process the next batch." if refresh_result.more
+
+    redirect_to admin_queues_path(**redirect_params), notice: notice
   end
 
   def set_mode
@@ -116,11 +154,16 @@ class AdminQueuesController < ApplicationController
     @global_queue_size = queue_summary[:total]
     @known_queue_size = queue_summary[:known]
     @rest_queue_size = queue_summary[:rest]
-    @queue_sizes = QueuedMessage.where(virtual_queue: @queue_configs.map(&:queue_name)).group(:virtual_queue).count
+    @global_runtime = QueuedMessage.runtime_summary
+    @rest_runtime = QueuedMessage.runtime_summary(QueuedMessage.outside_virtual_queues(known_queue_names))
+    @queue_runtime = QueuedMessage.runtime_by_virtual_queue(@queue_configs.map(&:queue_name))
+    @queue_snapshot_at = Time.current
+    @reclassify_after = params[:reclassify_after].to_i
 
     @new_queue ||= QueueConfiguration.new
     @new_rollup ||= MXRollup.new
     @smtp_probe_values ||= {}
+    @smtp_probe_values[:mail_from] ||= default_probe_mail_from
   end
 
   def load_queue_configuration
@@ -171,6 +214,11 @@ class AdminQueuesController < ApplicationController
 
     rollup.errors.add(:rollup_name, "must reference an enabled queue")
     false
+  end
+
+  def default_probe_mail_from
+    domain = Postal::Config.dns.return_path_domain.presence || Postal::Config.postal.smtp_hostname
+    domain.present? ? "postmaster@#{domain}" : nil
   end
 
 end

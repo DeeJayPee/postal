@@ -139,6 +139,70 @@ RSpec.describe AdminQueuesController, type: :controller do
     end
   end
 
+  describe "POST retry_queue" do
+    it "makes scheduled unlocked messages eligible without changing locked messages" do
+      queue = QueueConfiguration.create!(queue_name: "example.queue")
+      scheduled = create(:queued_message, virtual_queue: queue.queue_name, retry_after: 1.hour.from_now)
+      locked = create(:queued_message, :locked, virtual_queue: queue.queue_name, retry_after: 1.hour.from_now)
+
+      post :retry_queue, params: { queue_name: queue.queue_name }
+
+      expect(response).to redirect_to(admin_queues_path(anchor: "queue-configurations"))
+      expect(scheduled.reload.retry_after).to be_nil
+      expect(locked.reload.retry_after).to be_present
+    end
+  end
+
+  describe "POST smtp_probe" do
+    it "returns a backoff queue to normal after a successful real delivery" do
+      queue = QueueConfiguration.create!(queue_name: "example.queue", mode: "backoff")
+      result = SMTPConnectionProbe::Result.new(
+        connected: true,
+        recipient_accepted: true,
+        summary: "accepted",
+        transcript: "250 OK"
+      )
+      probe = instance_double(SMTPConnectionProbe, call: result)
+      allow(SMTPConnectionProbe).to receive(:new).and_return(probe)
+
+      post :smtp_probe, params: {
+        smtp_probe: {
+          queue_name: queue.queue_name,
+          recipient: "user@example.net",
+          mail_from: "sender@example.org"
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(queue.reload).to be_normal
+    end
+  end
+
+  describe "POST refresh_queue_assignments" do
+    it "runs one cursor batch and preserves the next cursor" do
+      QueueConfiguration.create!(queue_name: "example.queue")
+      result = VirtualQueueReclassifier::Result.new(
+        scanned: 1_000,
+        updated: 120,
+        errors: 0,
+        next_after_id: 4567,
+        more: true
+      )
+      refresher = instance_double(VirtualQueueReclassifier, call: result)
+      allow(VirtualQueueReclassifier).to receive(:new).and_return(refresher)
+
+      post :refresh_queue_assignments, params: { after_id: "1234" }
+
+      expect(VirtualQueueReclassifier).to have_received(:new).with(
+        enabled_queue_names: ["example.queue"],
+        after_id: "1234"
+      )
+      expect(response).to redirect_to(
+        admin_queues_path(reclassify_after: 4567, anchor: "queue-configurations")
+      )
+    end
+  end
+
   describe "admin access" do
     it "does not allow a non-admin to open a queue editor" do
       queue = QueueConfiguration.create!(queue_name: "example.queue")

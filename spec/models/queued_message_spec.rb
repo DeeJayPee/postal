@@ -77,6 +77,32 @@ RSpec.describe QueuedMessage do
     end
   end
 
+  describe ".runtime_summary" do
+    it "separates worker-ready, scheduled, and locked messages" do
+      create(:queued_message, retry_after: nil)
+      scheduled = create(:queued_message, retry_after: 1.hour.from_now)
+      create(:queued_message, :locked, retry_after: nil)
+
+      expect(described_class.runtime_summary).to include(
+        total: 3,
+        ready: 1,
+        scheduled: 1,
+        locked: 1
+      )
+      expect(described_class.runtime_summary[:next_attempt_at]).to be_within(1.second).of(scheduled.retry_after)
+    end
+  end
+
+  describe ".outside_virtual_queues" do
+    it "returns blank and unknown queue assignments" do
+      create(:queued_message, virtual_queue: "known.queue")
+      unknown = create(:queued_message, virtual_queue: "unknown.queue")
+      blank = create(:queued_message, virtual_queue: nil)
+
+      expect(described_class.outside_virtual_queues(["known.queue"]).order(:id)).to eq([unknown, blank].sort_by(&:id))
+    end
+  end
+
   describe "#retry_now" do
     it "removes the retry time" do
       message = create(:queued_message, retry_after: 2.minutes.from_now)
