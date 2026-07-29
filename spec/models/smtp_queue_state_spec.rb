@@ -6,6 +6,14 @@ RSpec.describe SMTPQueueState do
   let(:queue) { QueueConfiguration.create!(queue_name: "example.queue", max_msg_rate: "2/s") }
   let(:state) { described_class.for_virtual_queue!(queue.queue_name) }
 
+  it "returns the existing state when the queue has already been initialized" do
+    first = described_class.for_virtual_queue!(queue.queue_name)
+
+    expect {
+      expect(described_class.for_virtual_queue!(queue.queue_name)).to eq(first)
+    }.not_to change(described_class, :count)
+  end
+
   it "counts attempted recipients atomically in the configured window" do
     expect(state.reserve_message_attempt!(queue)).to be_allowed
     expect(state.reserve_message_attempt!(queue)).to be_allowed

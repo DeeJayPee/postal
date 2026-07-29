@@ -11,7 +11,11 @@ class SMTPQueueState < ApplicationRecord
 
   has_many :smtp_queue_leases, dependent: :delete_all
 
-  validates :queue_key, presence: true, uniqueness: true
+  # Uniqueness is enforced by the database index. A Rails uniqueness
+  # validation is incompatible with create_or_find_by!: when another worker
+  # has already inserted the row, validation raises RecordInvalid before the
+  # insert can raise RecordNotUnique and let create_or_find_by! reload it.
+  validates :queue_key, presence: true
   validates :consecutive_failures, numericality: { greater_than_or_equal_to: 0 }
   validates :rate_attempts, numericality: { greater_than_or_equal_to: 0 }
 
