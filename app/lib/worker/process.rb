@@ -311,6 +311,18 @@ module Worker
 
       register_prometheus_histogram :postal_message_queue_latency,
                                     docstring: "The length of time between a message being queued and being dequeued (in seconds)"
+
+      register_prometheus_counter :postal_smtp_queue_dispatches_total,
+                                  docstring: "SMTP dispatches acquired by configured queue or Rest",
+                                  labels: [:queue]
+
+      register_prometheus_counter :postal_smtp_queue_results_total,
+                                  docstring: "SMTP queue delivery outcomes",
+                                  labels: [:queue, :result]
+
+      register_prometheus_counter :postal_smtp_queue_deferrals_total,
+                                  docstring: "SMTP queue-level deferrals",
+                                  labels: [:queue, :reason]
     end
 
   end

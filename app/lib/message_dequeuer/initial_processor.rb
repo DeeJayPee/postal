@@ -8,6 +8,7 @@ module MessageDequeuer
     attr_accessor :send_result
 
     def process
+      @batch_locker = @queued_message.locked_by
       logger.tagged(original_queued_message: @queued_message.id) do
         logger.info "starting message unqueue"
         begin
@@ -20,10 +21,15 @@ module MessageDequeuer
             # Process the original message and then all of those
             # found for batching.
             process_message(@queued_message)
-            @other_messages&.each { |message| process_message(message) }
+            @other_messages&.each do |message|
+              break if @state.queue_blocked?
+
+              process_message(message)
+            end
           end
         ensure
           @state.finished
+          unlock_unprocessed_batch_messages
         end
         logger.info "finished message unqueue"
       end
@@ -57,7 +63,12 @@ module MessageDequeuer
     def find_other_messages_for_batch
       return unless Postal::Config.postal.batch_queued_messages?
 
-      @other_messages = @queued_message.batchable_messages(Postal::Config.postal.batch_queued_messages_limit)
+      configured_limit = if @queued_message.virtual_queue.present?
+                           QueueConfiguration.find_for_queue(@queued_message.virtual_queue)&.effective_max_msg_per_connection
+                         end
+      message_limit = configured_limit || 20
+      batch_limit = [Postal::Config.postal.batch_queued_messages_limit, message_limit].min - 1
+      @other_messages = batch_limit.positive? ? @queued_message.batchable_messages(batch_limit) : []
       log "found #{@other_messages.size} associated messages to process at the same time", batch_key: @queued_message.batch_key
     rescue StandardError
       @queued_message.unlock
@@ -65,9 +76,17 @@ module MessageDequeuer
     end
 
     def process_message(queued_message)
+      @state.renew_queue_lease!
       logger.tagged(queued_message: queued_message.id) do
         SingleMessageProcessor.process(queued_message, logger: @logger, state: @state)
       end
+    end
+
+    def unlock_unprocessed_batch_messages
+      return if @other_messages.blank?
+
+      QueuedMessage.where(id: @other_messages.map(&:id), locked_by: @batch_locker)
+                   .update_all(locked_by: nil, locked_at: nil)
     end
 
   end

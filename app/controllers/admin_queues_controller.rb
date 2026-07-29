@@ -100,6 +100,7 @@ class AdminQueuesController < ApplicationController
                                       .where("retry_after IS NOT NULL AND retry_after >= ?", 30.seconds.ago)
     scheduled_count = scheduled_messages.count
     scheduled_messages.update_all(retry_after: nil)
+    SMTPQueueState.for_virtual_queue!(queue_config.queue_name).retry_now!
 
     redirect_to admin_queues_path(anchor: "queue-configurations"),
                 notice: "#{scheduled_count} message(s) in #{queue_config.queue_name} are eligible for the next worker run."
@@ -157,6 +158,18 @@ class AdminQueuesController < ApplicationController
     @global_runtime = QueuedMessage.runtime_summary
     @rest_runtime = QueuedMessage.runtime_summary(QueuedMessage.outside_virtual_queues(known_queue_names))
     @queue_runtime = QueuedMessage.runtime_by_virtual_queue(@queue_configs.map(&:queue_name))
+    queue_states = SMTPQueueState.where(
+      queue_key: @queue_configs.map { |config| "virtual:#{config.queue_name}" }
+    ).includes(:smtp_queue_leases).index_by(&:virtual_queue)
+    queue_configs_by_name = @queue_configs.index_by(&:queue_name)
+    @queue_runtime.each do |queue_name, runtime|
+      state = queue_states[queue_name]
+      config = queue_configs_by_name.fetch(queue_name)
+      runtime[:active_smtp_out] = state&.active_lease_count.to_i
+      runtime[:smtp_out_limit] = state&.consecutive_failures.to_i.positive? ? 1 : config.effective_max_smtp_out
+      runtime[:queue_next_attempt_at] = state&.next_attempt_at
+      runtime[:last_error] = state&.last_error
+    end
     @queue_snapshot_at = Time.current
     @reclassify_after = params[:reclassify_after].to_i
 
@@ -194,8 +207,13 @@ class AdminQueuesController < ApplicationController
       :description,
       :min_smtp_out,
       :max_smtp_out,
+      :backoff_max_smtp_out,
       :max_rcpt_per_message,
       :max_msg_rate,
+      :retry_after,
+      :backoff_retry_after,
+      :max_msg_per_connection,
+      :mx_connection_attempts,
       :mode,
       :backoff_reroute_to,
       :backoff_base_delay_seconds,

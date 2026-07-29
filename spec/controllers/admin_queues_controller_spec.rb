@@ -31,7 +31,12 @@ RSpec.describe AdminQueuesController, type: :controller do
           max_msg_rate: "2000/h",
           min_smtp_out: 2,
           max_smtp_out: 5,
+          backoff_max_smtp_out: 2,
           max_rcpt_per_message: 50,
+          retry_after: "15m",
+          backoff_retry_after: "2h",
+          max_msg_per_connection: 25,
+          mx_connection_attempts: 3,
           backoff_base_delay_seconds: 10_800,
           backoff_auto_success_threshold: 3,
           backoff_auto_success_window_seconds: 21_600,
@@ -46,7 +51,12 @@ RSpec.describe AdminQueuesController, type: :controller do
         max_msg_rate: "2000/h",
         min_smtp_out: 2,
         max_smtp_out: 5,
+        backoff_max_smtp_out: 2,
         max_rcpt_per_message: 50,
+        retry_after: "15m",
+        backoff_retry_after: "2h",
+        max_msg_per_connection: 25,
+        mx_connection_attempts: 3,
         backoff_base_delay_seconds: 10_800,
         backoff_auto_success_threshold: 3,
         backoff_auto_success_window_seconds: 21_600,
@@ -144,12 +154,15 @@ RSpec.describe AdminQueuesController, type: :controller do
       queue = QueueConfiguration.create!(queue_name: "example.queue")
       scheduled = create(:queued_message, virtual_queue: queue.queue_name, retry_after: 1.hour.from_now)
       locked = create(:queued_message, :locked, virtual_queue: queue.queue_name, retry_after: 1.hour.from_now)
+      state = SMTPQueueState.for_virtual_queue!(queue.queue_name)
+      state.update!(next_attempt_at: 1.hour.from_now, consecutive_failures: 1)
 
       post :retry_queue, params: { queue_name: queue.queue_name }
 
       expect(response).to redirect_to(admin_queues_path(anchor: "queue-configurations"))
       expect(scheduled.reload.retry_after).to be_nil
       expect(locked.reload.retry_after).to be_present
+      expect(state.reload.next_attempt_at).to be_nil
     end
   end
 

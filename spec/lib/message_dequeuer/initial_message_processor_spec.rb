@@ -71,6 +71,18 @@ module MessageDequeuer
           end
           processor.process
         end
+
+        it "unlocks the remainder of the batch when the queue is deferred" do
+          allow(SingleMessageProcessor).to receive(:process) do |message_to_process, **|
+            processor.state.instance_variable_set(:@queue_blocked, true) if message_to_process == queued_message
+          end
+
+          processor.process
+
+          expect(SingleMessageProcessor).to have_received(:process).once
+          expect(@queued_message2.reload).not_to be_locked
+          expect(@queued_message3.reload).not_to be_locked
+        end
       end
 
       context "when postal.batch_queued_messages is disabled" do

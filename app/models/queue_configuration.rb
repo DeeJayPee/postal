@@ -17,6 +17,11 @@
 #  updated_at             :datetime         not null
 #  max_msg_rate           :string(255)
 #  backoff_reroute_to     :string(255)
+#  backoff_max_smtp_out   :integer          default(1), not null
+#  retry_after            :string(255)      default("10m"), not null
+#  backoff_retry_after    :string(255)      default("1h"), not null
+#  max_msg_per_connection :integer          default(20), not null
+#  mx_connection_attempts :integer          default(2), not null
 #
 
 class QueueConfiguration < ApplicationRecord
@@ -28,6 +33,9 @@ class QueueConfiguration < ApplicationRecord
   validates :min_smtp_out, numericality: { greater_than_or_equal_to: 1 }
   validates :max_smtp_out, numericality: { greater_than_or_equal_to: 1 }
   validates :max_rcpt_per_message, numericality: { greater_than_or_equal_to: 1 }
+  validates :backoff_max_smtp_out, numericality: { greater_than_or_equal_to: 1 }
+  validates :max_msg_per_connection, numericality: { greater_than_or_equal_to: 1 }
+  validates :mx_connection_attempts, numericality: { greater_than_or_equal_to: 1 }
   validates :mode, inclusion: { in: MODES }, allow_nil: true
   validates :backoff_base_delay_seconds, numericality: { greater_than_or_equal_to: 1 }, allow_nil: true
   validates :backoff_auto_success_threshold, numericality: { greater_than_or_equal_to: 1 }, allow_nil: true
@@ -35,6 +43,7 @@ class QueueConfiguration < ApplicationRecord
   validates :backoff_success_count, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validate :validate_max_msg_rate_format
   validate :validate_backoff_reroute_to_format
+  validate :validate_retry_intervals
 
   scope :enabled, -> { where(enabled: true) }
 
@@ -45,7 +54,7 @@ class QueueConfiguration < ApplicationRecord
 
   # Get the effective max concurrent connections for this queue
   def effective_max_smtp_out
-    max_smtp_out || 1
+    backoff? ? (backoff_max_smtp_out || 1) : (max_smtp_out || 1)
   end
 
   # Get the effective min concurrent connections for this queue
@@ -85,6 +94,7 @@ class QueueConfiguration < ApplicationRecord
       backoff_last_success_at: nil,
       backoff_success_count: 0
     )
+    SMTPQueueState.for_virtual_queue!(queue_name).retry_now!
   end
 
   # Track successful sends while in backoff mode and auto-return when configured.
@@ -138,12 +148,28 @@ class QueueConfiguration < ApplicationRecord
     [((rate[:period].to_f / rate[:count].to_f).ceil), 60].max
   end
 
+  def retry_after_seconds
+    self.class.duration_string_to_seconds(retry_after, default: 10.minutes.to_i)
+  end
+
+  def backoff_retry_after_seconds
+    self.class.duration_string_to_seconds(backoff_retry_after, default: 1.hour.to_i)
+  end
+
+  def effective_max_msg_per_connection
+    max_msg_per_connection || 20
+  end
+
+  def effective_mx_connection_attempts
+    mx_connection_attempts || 2
+  end
+
   # Parse max_msg_rate string (e.g., "2000/h", "100/m", "10000/d") into messages per second
   # Returns nil if not set or invalid format
   def parsed_max_msg_rate
     return nil if max_msg_rate.blank?
 
-    if max_msg_rate =~ /^(\d+)\/(d|h|m|s)$/
+    if max_msg_rate =~ /^([1-9]\d*)\/(d|h|m|s)$/
       count = ::Regexp.last_match(1).to_i
       unit = ::Regexp.last_match(2)
 
@@ -162,18 +188,11 @@ class QueueConfiguration < ApplicationRecord
 
   # Check if we can send another message based on rate limits
   def can_send_message?
-    return true unless max_msg_rate.present?
+    SMTPQueueState.for_virtual_queue!(queue_name).message_attempt_available?(self)
+  end
 
-    rate = parsed_max_msg_rate
-    return true unless rate
-
-    # Count messages sent in the rate period for this queue
-    cutoff_time = Time.current - rate[:period].seconds
-    sent_count = QueuedMessage.where(virtual_queue: queue_name)
-                               .where('created_at >= ?', cutoff_time)
-                               .count
-
-    sent_count < rate[:count]
+  def reserve_message_attempt
+    SMTPQueueState.for_virtual_queue!(queue_name).reserve_message_attempt!(self)
   end
 
   # Get the backoff reroute relay server if configured
@@ -193,7 +212,7 @@ class QueueConfiguration < ApplicationRecord
   def validate_max_msg_rate_format
     return if max_msg_rate.blank?
 
-    unless max_msg_rate =~ /^\d+\/(d|h|m|s)$/
+    unless max_msg_rate =~ /^[1-9]\d*\/(d|h|m|s)$/
       errors.add(:max_msg_rate, 'must be in format: number/unit (e.g., 10000/d, 2000/h, 100/m, 10/s)')
     end
   end
@@ -209,6 +228,17 @@ class QueueConfiguration < ApplicationRecord
 
     unless backoff_reroute_to =~ hostname_pattern || backoff_reroute_to =~ ipv4_pattern || backoff_reroute_to =~ ipv6_pattern
       errors.add(:backoff_reroute_to, 'must be a valid hostname or IP address')
+    end
+  end
+
+  def validate_retry_intervals
+    {
+      retry_after: retry_after,
+      backoff_retry_after: backoff_retry_after
+    }.each do |attribute, value|
+      next if value.to_s.match?(/\A[1-9]\d*[dhms]\z/)
+
+      errors.add(attribute, "must be a duration such as 30s, 10m, 2h, or 1d")
     end
   end
 
@@ -234,6 +264,16 @@ class QueueConfiguration < ApplicationRecord
           current_queue.max_rcpt_per_message = ::Regexp.last_match(1).to_i
         elsif line =~ /^\s*max-msg-rate\s+(\d+\/[dhms])/
           current_queue.max_msg_rate = ::Regexp.last_match(1)
+        elsif line =~ /^\s*backoff-max-smtp-out\s+(\d+)/
+          current_queue.backoff_max_smtp_out = ::Regexp.last_match(1).to_i
+        elsif line =~ /^\s*retry-after\s+(\d+[dhms])/
+          current_queue.retry_after = ::Regexp.last_match(1)
+        elsif line =~ /^\s*backoff-retry-after\s+(\d+[dhms])/
+          current_queue.backoff_retry_after = ::Regexp.last_match(1)
+        elsif line =~ /^\s*max-msg-per-connection\s+(\d+)/
+          current_queue.max_msg_per_connection = ::Regexp.last_match(1).to_i
+        elsif line =~ /^\s*mx-connection-attempts\s+(\d+)/
+          current_queue.mx_connection_attempts = ::Regexp.last_match(1).to_i
         elsif line =~ /^\s*backoff-reroute-to\s+(\S+)/
           current_queue.backoff_reroute_to = ::Regexp.last_match(1)
         elsif line =~ /^\s*backoff-base-delay\s+(\d+)([dhms])/
@@ -268,5 +308,11 @@ class QueueConfiguration < ApplicationRecord
     end
   end
 
-  public_class_method :duration_to_seconds
+  def self.duration_string_to_seconds(value, default:)
+    return default unless value.to_s =~ /\A([1-9]\d*)([dhms])\z/
+
+    duration_to_seconds(::Regexp.last_match(1).to_i, ::Regexp.last_match(2))
+  end
+
+  public_class_method :duration_to_seconds, :duration_string_to_seconds
 end

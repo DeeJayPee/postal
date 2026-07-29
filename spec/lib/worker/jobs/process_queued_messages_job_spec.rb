@@ -34,7 +34,11 @@ module Worker
           it "locks the message and calls the service" do
             queued_message = create(:queued_message, ip_address: nil, retry_after: nil)
             job.call
-            expect(MessageDequeuer).to have_received(:process).with(queued_message, logger: kind_of(Klogger::Logger))
+            expect(MessageDequeuer).to have_received(:process).with(
+              queued_message,
+              logger: kind_of(Klogger::Logger),
+              queue_lease: kind_of(SMTPQueueLease)
+            )
             expect(queued_message.reload.locked?).to be true
             expect(queued_message.locked_by).to match(/\A#{Postal.locker_name} [a-f0-9]{16}\z/)
             expect(queued_message.locked_at).to be_within(1.second).of(Time.current)
@@ -45,7 +49,11 @@ module Worker
           it "locks the message and calls the service" do
             queued_message = create(:queued_message, ip_address: nil, retry_after: 10.minutes.ago)
             job.call
-            expect(MessageDequeuer).to have_received(:process).with(queued_message, logger: kind_of(Klogger::Logger))
+            expect(MessageDequeuer).to have_received(:process).with(
+              queued_message,
+              logger: kind_of(Klogger::Logger),
+              queue_lease: kind_of(SMTPQueueLease)
+            )
             expect(queued_message.reload.locked?).to be true
             expect(queued_message.locked_by).to match(/\A#{Postal.locker_name} [a-f0-9]{16}\z/)
             expect(queued_message.locked_at).to be_within(1.second).of(Time.current)
@@ -85,7 +93,11 @@ module Worker
             allow(Socket).to receive(:ip_address_list).and_return([Addrinfo.new(["AF_INET", 1, "localhost.localdomain", "10.20.30.40"])])
             queued_message = create(:queued_message, ip_address: ip_address)
             job.call
-            expect(MessageDequeuer).to have_received(:process).with(queued_message, logger: kind_of(Klogger::Logger))
+            expect(MessageDequeuer).to have_received(:process).with(
+              queued_message,
+              logger: kind_of(Klogger::Logger),
+              queue_lease: kind_of(SMTPQueueLease)
+            )
             expect(queued_message.reload.locked?).to be true
             expect(queued_message.locked_by).to match(/\A#{Postal.locker_name} [a-f0-9]{16}\z/)
             expect(queued_message.locked_at).to be_within(1.second).of(Time.current)

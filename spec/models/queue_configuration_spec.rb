@@ -73,4 +73,21 @@ RSpec.describe QueueConfiguration do
       expect(queue.rate_limit_retry_seconds).to eq(120)
     end
   end
+
+  describe "scheduler settings" do
+    it "uses separate normal and backoff connection limits" do
+      queue.update!(max_smtp_out: 5, backoff_max_smtp_out: 1)
+      expect(queue.effective_max_smtp_out).to eq(5)
+
+      queue.enter_backoff!
+      expect(queue.effective_max_smtp_out).to eq(1)
+    end
+
+    it "parses queue retry intervals" do
+      queue.update!(retry_after: "15m", backoff_retry_after: "2h")
+
+      expect(queue.retry_after_seconds).to eq(15.minutes.to_i)
+      expect(queue.backoff_retry_after_seconds).to eq(2.hours.to_i)
+    end
+  end
 end

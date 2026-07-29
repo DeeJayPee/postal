@@ -146,6 +146,7 @@ module MessageDequeuer
       @result = sender.send_message(queued_message.message)
       apply_backoff_rule_to_sender_result
       update_queue_backoff_success_tracking
+      @state.record_send_result(@result)
       return unless @result.connect_error
 
       @state.send_result = @result
@@ -154,7 +155,10 @@ module MessageDequeuer
     def sender_options
       return {} if queued_message.virtual_queue.blank?
 
-      { queue_name: queued_message.virtual_queue }
+      {
+        queue_name: queued_message.virtual_queue,
+        mx_attempt_offset: queued_message.attempts
+      }
     end
 
     def apply_backoff_rule_to_sender_result
@@ -179,6 +183,7 @@ module MessageDequeuer
                         else
                           queued_message.calculate_retry_time(queued_message.attempts, queue_config.effective_backoff_base_delay).to_i
                         end
+        @result.queue_retry_after = @result.retry if queue_config.backoff_relay_server
       when BackoffRule::ACTION_BOUNCE_RCPT
         @result.type = "HardFail"
         @result.retry = nil

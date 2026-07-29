@@ -181,6 +181,13 @@ Send a real diagnostic email and print the full SMTP transcript:
 bundle exec rake 'postal:smtp_rollup:probe_smtp[user@orange.fr,orange.queue,probe@example.org]'
 ```
 
+Preview or apply queue assignment changes to the existing backlog:
+
+```bash
+bundle exec rake 'postal:queues:reclassify[all,true,1000]'
+bundle exec rake 'postal:queues:reclassify[example.queue,false,1000]'
+```
+
 ### Import Configurations
 
 ```bash
@@ -222,8 +229,12 @@ bundle exec rake postal:smtp_rollup:stats
 
 ### queue_configurations
 - `queue_name` - Virtual queue name
-- `min_smtp_out` - Minimum concurrent SMTP connections
-- `max_smtp_out` - Maximum concurrent SMTP connections
+- `min_smtp_out` - PowerMTA import compatibility; Postal opens connections on demand
+- `max_smtp_out` - Maximum concurrent SMTP connections across all workers
+- `backoff_max_smtp_out` - Maximum concurrent connections in backoff
+- `retry_after` / `backoff_retry_after` - Queue-level connection retry delays
+- `max_msg_per_connection` - Bounded delivery quantum per connection
+- `mx_connection_attempts` - MX endpoint attempts per scheduler pass
 - `max_rcpt_per_message` - Max recipients per message
 - `max_msg_rate` - Maximum message rate limit (e.g., 2000/h, 100/m, 10/s)
 - `mode` - Queue mode (`normal` or `backoff`)

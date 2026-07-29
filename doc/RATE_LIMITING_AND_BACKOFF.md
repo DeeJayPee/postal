@@ -38,7 +38,7 @@ max-msg-rate 10/s     # 10 messages per second
 ### How It Works
 
 1. When a message is about to be sent via `SMTPSenderWithRollup`, the system checks if the queue has a `max-msg-rate` configured
-2. It counts messages sent through that virtual queue in the configured time window
+2. It atomically counts recipients actually attempted through that virtual queue in the configured time window
 3. If the limit is reached, sending is deferred (soft-fail) and retried later from the same queue
 4. The counter resets based on the sliding time window
 
@@ -233,14 +233,8 @@ can_send = config.can_send_message?
 # => true or false
 ```
 
-### Check Messages Sent
-```sql
--- Messages sent in last hour for a queue
-SELECT COUNT(*)
-FROM queued_messages
-WHERE virtual_queue = 'orange.queue'
-  AND created_at >= NOW() - INTERVAL 1 HOUR;
-```
+The counter is stored in `smtp_queue_states`; queued message creation time is
+not used as a delivery-rate proxy.
 
 ### Verify Backoff Relay
 ```ruby

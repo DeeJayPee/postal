@@ -411,7 +411,8 @@ module MessageDequeuer
             SMTPSenderWithRollup,
             message.recipient_domain,
             nil,
-            queue_name: "example.queue"
+            queue_name: "example.queue",
+            mx_attempt_offset: queued_message.attempts
           ).and_return(mocked_sender)
 
           processor.process

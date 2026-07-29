@@ -43,8 +43,12 @@ This groups the specified domains into the `orange.queue` virtual queue.
 
 Queue configurations define the SMTP connection behavior for each virtual queue:
 
-- `min-smtp-out`: Minimum concurrent SMTP connections
-- `max-smtp-out`: Maximum concurrent SMTP connections
+- `min-smtp-out`: Accepted for PowerMTA configuration compatibility; Postal does not pre-open connections
+- `max-smtp-out`: Maximum concurrent SMTP connections across all Postal workers
+- `backoff-max-smtp-out`: Maximum concurrent connections while the queue is in backoff
+- `retry-after` / `backoff-retry-after`: Queue-level delays after connection failures
+- `max-msg-per-connection`: Maximum bounded batch sent before yielding to another queue
+- `mx-connection-attempts`: Maximum MX endpoints tried during one scheduler pass
 - `max-rcpt-per-message`: Maximum recipients per message
 - `max-msg-rate`: Maximum message rate limit (format: `number/unit` where unit is `d` for day, `h` for hour, `m` for minute, or `s` for second)
 - `mode`: Queue mode (`normal` or `backoff`)
@@ -192,6 +196,19 @@ Example:
 
 ## How It Works
 
+### Fair Queue Scheduler
+
+Workers select an eligible virtual queue (or the recipient domain when no
+rollup is assigned) before selecting a message. MariaDB leases enforce
+`max-smtp-out` across every worker process. A connection failure defers that
+queue as a whole, so its remaining messages do not occupy worker threads while
+unrelated queues are healthy. When the delay expires, one half-open delivery is
+allowed; success clears the queue failure state.
+
+Each dispatch reuses its SMTP connection for at most
+`max-msg-per-connection` messages with the same recipient domain and source IP,
+then yields to the least recently served queue.
+
 ### Message Flow
 
 1. **Message Queuing**: When a message is queued, Postal checks if the recipient domain matches:
@@ -243,6 +260,8 @@ The equivalent shell commands are:
 ```bash
 bundle exec rake 'postal:smtp_rollup:retry_queue_now[ovh.queue]'
 bundle exec rake postal:smtp_rollup:refresh_queue_assignments
+bundle exec rake 'postal:queues:reclassify[all,true,1000]'     # dry run, every queue
+bundle exec rake 'postal:queues:reclassify[example.queue,false,1000]'
 ```
 
 ```bash
@@ -338,8 +357,12 @@ mx apc.olc.protection.outlook.com outlook-apc.rollup
 
 ### queue_configurations Table
 - `queue_name`: Virtual queue name
-- `min_smtp_out`: Minimum concurrent connections
-- `max_smtp_out`: Maximum concurrent connections
+- `min_smtp_out`: Import compatibility setting; connections are opened on demand
+- `max_smtp_out`: Maximum concurrent connections across all workers
+- `backoff_max_smtp_out`: Maximum concurrent connections in backoff
+- `retry_after`, `backoff_retry_after`: Queue retry intervals
+- `max_msg_per_connection`: Delivery quantum on one connection
+- `mx_connection_attempts`: MX endpoint attempt budget per pass
 - `max_rcpt_per_message`: Max recipients per message
 - `max_msg_rate`: Message rate limit (e.g., "2000/h", "100/m", "10/s")
 - `mode`: Queue mode (`normal` or `backoff`)

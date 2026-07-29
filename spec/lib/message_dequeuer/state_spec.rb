@@ -25,6 +25,29 @@ module MessageDequeuer
         sender = state.sender_for(HTTPSender, "1234")
         expect(state.sender_for(HTTPSender, "1234")).to be sender
       end
+
+      it "reuses a rollup sender when only the MX rotation offset changes" do
+        sender = instance_double(SMTPSenderWithRollup, start: true)
+        allow(SMTPSenderWithRollup).to receive(:new).and_return(sender)
+
+        first = state.sender_for(
+          SMTPSenderWithRollup,
+          "example.com",
+          nil,
+          queue_name: "example.queue",
+          mx_attempt_offset: 0
+        )
+        second = state.sender_for(
+          SMTPSenderWithRollup,
+          "example.com",
+          nil,
+          queue_name: "example.queue",
+          mx_attempt_offset: 2
+        )
+
+        expect(second).to be(first)
+        expect(SMTPSenderWithRollup).to have_received(:new).once
+      end
     end
 
     describe "#finished" do

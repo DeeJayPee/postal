@@ -69,6 +69,7 @@
             %td Max Rcpt
             %td Backoff Relay
             %td Backoff Delay
+            %td Last queue error
             %td Auto Return
             %td Action
         %tbody
@@ -83,10 +84,11 @@
               %td= number_with_delimiter(runtime[:ready])
               %td= number_with_delimiter(runtime[:scheduled])
               %td= number_with_delimiter(runtime[:locked])
-              %td= runtime[:next_attempt_at] ? runtime[:next_attempt_at].to_fs(:short) : "-"
+              - next_attempt = [runtime[:next_attempt_at], runtime[:queue_next_attempt_at]].compact.max
+              %td= next_attempt ? next_attempt.to_fs(:short) : "-"
               %td= config.mode
               %td= config.max_msg_rate || "-"
-              %td= "#{config.min_smtp_out}-#{config.max_smtp_out}"
+              %td= "#{runtime[:active_smtp_out]}/#{runtime[:smtp_out_limit]}"
               %td= config.max_rcpt_per_message || "-"
               %td= config.backoff_reroute_to || "-"
               %td
@@ -94,6 +96,7 @@
                   = distance_of_time_in_words(Time.current, Time.current + config.backoff_base_delay_seconds)
                 - else
                   = "-"
+              %td= runtime[:last_error].present? ? truncate(runtime[:last_error], length: 200) : "-"
               %td= auto_return
               %td
                 .buttonSet

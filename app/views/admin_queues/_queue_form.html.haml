@@ -21,6 +21,13 @@
         .fieldSet__input= f.number_field :max_smtp_out, class: "input input--text", min: 1, required: true
     .fieldSet__fieldPair
       .fieldSet__field
+        = f.label :backoff_max_smtp_out, "Backoff max SMTP out", class: "fieldSet__label"
+        .fieldSet__input= f.number_field :backoff_max_smtp_out, class: "input input--text", min: 1, required: true
+      .fieldSet__field
+        = f.label :mx_connection_attempts, "MX attempts per pass", class: "fieldSet__label"
+        .fieldSet__input= f.number_field :mx_connection_attempts, class: "input input--text", min: 1, required: true
+    .fieldSet__fieldPair
+      .fieldSet__field
         = f.label :max_rcpt_per_message, "Max recipients", class: "fieldSet__label"
         .fieldSet__input= f.number_field :max_rcpt_per_message, class: "input input--text", min: 1, required: true
       .fieldSet__field
@@ -31,11 +38,21 @@
         = f.label :mode, class: "fieldSet__label"
         .fieldSet__input= f.select :mode, QueueConfiguration::MODES, {}, class: "input input--select"
       .fieldSet__field
-        = f.label :backoff_base_delay_seconds, "Backoff delay (seconds)", class: "fieldSet__label"
-        .fieldSet__input= f.number_field :backoff_base_delay_seconds, class: "input input--text", min: 1
+        = f.label :max_msg_per_connection, "Messages per connection", class: "fieldSet__label"
+        .fieldSet__input= f.number_field :max_msg_per_connection, class: "input input--text", min: 1, required: true
+    .fieldSet__fieldPair
+      .fieldSet__field
+        = f.label :retry_after, "Retry after", class: "fieldSet__label"
+        .fieldSet__input= f.text_field :retry_after, class: "input input--text", placeholder: "10m", required: true
+      .fieldSet__field
+        = f.label :backoff_retry_after, "Backoff retry after", class: "fieldSet__label"
+        .fieldSet__input= f.text_field :backoff_retry_after, class: "input input--text", placeholder: "1h", required: true
     .fieldSet__field
       = f.label :backoff_reroute_to, "Backoff relay", class: "fieldSet__label"
       .fieldSet__input= f.text_field :backoff_reroute_to, class: "input input--text", placeholder: "relay.example.com"
+    .fieldSet__field
+      = f.label :backoff_base_delay_seconds, "Recipient backoff delay (seconds)", class: "fieldSet__label"
+      .fieldSet__input= f.number_field :backoff_base_delay_seconds, class: "input input--text", min: 1
     .fieldSet__fieldPair
       .fieldSet__field
         = f.label :backoff_auto_success_threshold, "Auto-return successes", class: "fieldSet__label"

@@ -123,9 +123,25 @@ class QueuedMessage < ApplicationRecord
       []
     else
       time = Time.now
-      locker = Postal.locker_name
-      self.class.ready.where(batch_key: batch_key, ip_address_id: ip_address_id, locked_by: nil, locked_at: nil).limit(limit).update_all(locked_by: locker, locked_at: time)
-      QueuedMessage.where(batch_key: batch_key, ip_address_id: ip_address_id, locked_by: locker, locked_at: time).where.not(id: id)
+      locker = locked_by
+      self.class.ready
+                .where(
+                  batch_key: batch_key,
+                  domain: domain,
+                  ip_address_id: ip_address_id,
+                  locked_by: nil,
+                  locked_at: nil
+                )
+                .order(:created_at, :id)
+                .limit(limit)
+                .update_all(locked_by: locker, locked_at: time)
+      QueuedMessage.where(
+        batch_key: batch_key,
+        domain: domain,
+        ip_address_id: ip_address_id,
+        locked_by: locker,
+        locked_at: time
+      ).where.not(id: id)
     end
   end
 

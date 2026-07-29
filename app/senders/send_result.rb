@@ -11,6 +11,7 @@ class SendResult
   attr_accessor :log_id
   attr_accessor :time
   attr_accessor :suppress_bounce
+  attr_accessor :queue_retry_after
 
   def initialize
     @details = ""

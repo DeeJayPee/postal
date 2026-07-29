@@ -3,6 +3,39 @@
 require "pathname"
 
 namespace :postal do
+  namespace :queues do
+    desc "Reclassify pending messages. Usage: rake 'postal:queues:reclassify[queue_name,dry_run,batch_size]'"
+    task :reclassify, [:queue_name, :dry_run, :batch_size] => :environment do |_t, args|
+      enabled_queue_names = QueueConfiguration.enabled.pluck(:queue_name)
+      target_queue_name = args[:queue_name].presence
+      target_queue_name = nil if target_queue_name == "all"
+      dry_run = ActiveModel::Type::Boolean.new.cast(args[:dry_run])
+      batch_size = args[:batch_size].presence&.to_i || VirtualQueueReclassifier::BATCH_SIZE
+      after_id = 0
+      totals = { scanned: 0, updated: 0, errors: 0 }
+
+      loop do
+        result = VirtualQueueReclassifier.new(
+          enabled_queue_names: enabled_queue_names,
+          after_id: after_id,
+          dry_run: dry_run,
+          target_queue_name: target_queue_name,
+          batch_size: batch_size,
+          only_unassigned: false
+        ).call
+        totals[:scanned] += result.scanned
+        totals[:updated] += result.updated
+        totals[:errors] += result.errors
+        break unless result.more
+
+        after_id = result.next_after_id
+      end
+
+      action = dry_run ? "would be reclassified" : "reclassified"
+      puts "✓ Scanned #{totals[:scanned]} pending message(s); #{totals[:updated]} #{action}; errors #{totals[:errors]}"
+    end
+  end
+
   namespace :smtp_rollup do
 
     def resolve_rollup_config_path(explicit_path, default_filename)
@@ -139,7 +172,10 @@ namespace :postal do
             puts "✓ Imported queue config: #{current_queue.queue_name}"
             puts "  → min_smtp_out: #{current_queue.min_smtp_out}"
             puts "  → max_smtp_out: #{current_queue.max_smtp_out}"
+            puts "  → backoff_max_smtp_out: #{current_queue.backoff_max_smtp_out}"
             puts "  → max_rcpt_per_message: #{current_queue.max_rcpt_per_message}"
+            puts "  → max_msg_per_connection: #{current_queue.max_msg_per_connection}"
+            puts "  → mx_connection_attempts: #{current_queue.mx_connection_attempts}"
             puts "  → max_msg_rate: #{current_queue.max_msg_rate}" if current_queue.max_msg_rate.present?
             puts "  → backoff_reroute_to: #{current_queue.backoff_reroute_to}" if current_queue.backoff_reroute_to.present?
             puts "  → mode: #{current_queue.mode}" if current_queue.mode.present?
@@ -158,6 +194,16 @@ namespace :postal do
             current_queue.max_rcpt_per_message = ::Regexp.last_match(1).to_i
           elsif line =~ /^\s*max-msg-rate\s+(\d+\/[dhms])/
             current_queue.max_msg_rate = ::Regexp.last_match(1)
+          elsif line =~ /^\s*backoff-max-smtp-out\s+(\d+)/
+            current_queue.backoff_max_smtp_out = ::Regexp.last_match(1).to_i
+          elsif line =~ /^\s*retry-after\s+(\d+[dhms])/
+            current_queue.retry_after = ::Regexp.last_match(1)
+          elsif line =~ /^\s*backoff-retry-after\s+(\d+[dhms])/
+            current_queue.backoff_retry_after = ::Regexp.last_match(1)
+          elsif line =~ /^\s*max-msg-per-connection\s+(\d+)/
+            current_queue.max_msg_per_connection = ::Regexp.last_match(1).to_i
+          elsif line =~ /^\s*mx-connection-attempts\s+(\d+)/
+            current_queue.mx_connection_attempts = ::Regexp.last_match(1).to_i
           elsif line =~ /^\s*backoff-reroute-to\s+(\S+)/
             current_queue.backoff_reroute_to = ::Regexp.last_match(1)
           elsif line =~ /^\s*mode\s+(normal|backoff)/
@@ -250,8 +296,13 @@ namespace :postal do
           f.puts "<domain #{config.queue_name}>"
           f.puts "    min-smtp-out #{config.min_smtp_out}"
           f.puts "    max-smtp-out #{config.max_smtp_out}"
+          f.puts "    backoff-max-smtp-out #{config.backoff_max_smtp_out}"
           f.puts "    max-rcpt-per-message #{config.max_rcpt_per_message}"
+          f.puts "    max-msg-per-connection #{config.max_msg_per_connection}"
+          f.puts "    mx-connection-attempts #{config.mx_connection_attempts}"
           f.puts "    max-msg-rate #{config.max_msg_rate}" if config.max_msg_rate.present?
+          f.puts "    retry-after #{config.retry_after}"
+          f.puts "    backoff-retry-after #{config.backoff_retry_after}"
           f.puts "    backoff-reroute-to #{config.backoff_reroute_to}" if config.backoff_reroute_to.present?
           f.puts "    mode #{config.mode}" if config.mode.present?
           if config.backoff_base_delay_seconds.present?
