@@ -39,6 +39,17 @@ class QueuedMessage < ApplicationRecord
   scope :ready_with_delayed_retry, -> { where("retry_after IS NULL OR retry_after < ?", 30.seconds.ago) }
   scope :with_stale_lock, -> { where("locked_at IS NOT NULL AND locked_at < ?", Postal::Config.postal.queued_message_lock_stale_days.days.ago) }
 
+  def self.global_queue_summary(known_queue_names)
+    total = count
+    known = known_queue_names.present? ? where(virtual_queue: known_queue_names).count : 0
+
+    {
+      total: total,
+      known: known,
+      rest: total - known
+    }
+  end
+
   def retry_now
     update!(retry_after: nil)
   end

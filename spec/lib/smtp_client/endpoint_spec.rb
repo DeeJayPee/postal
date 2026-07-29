@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "stringio"
 
 module SMTPClient
 
@@ -16,6 +17,7 @@ module SMTPClient
         allow(smtp).to receive(:started?).and_return(true)
         allow(smtp).to receive(:send_message)
         allow(smtp).to receive(:finish)
+        allow(smtp).to receive(:set_debug_output)
         smtp
       end
     end
@@ -81,6 +83,13 @@ module SMTPClient
         it "sets the TLS hostname" do
           client = endpoint.start_smtp_session
           expect(client.tls_hostname).to eq "mx1.example.com"
+        end
+
+        it "forwards an optional SMTP debug output" do
+          output = StringIO.new
+          client = endpoint.start_smtp_session(debug_output: output)
+
+          expect(client).to have_received(:set_debug_output).with(output)
         end
 
         it "starts the SMTP client the default HELO" do

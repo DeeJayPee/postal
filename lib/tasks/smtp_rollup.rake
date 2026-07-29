@@ -296,6 +296,51 @@ namespace :postal do
       end
     end
 
+    desc "Add/update a queue. Usage: rake 'postal:smtp_rollup:add_queue[name,min,max,max_rcpt,max_msg_rate]'"
+    task :add_queue, [:queue_name, :min_smtp_out, :max_smtp_out, :max_rcpt_per_message, :max_msg_rate] => :environment do |_t, args|
+      queue = QueueConfiguration.find_or_initialize_by(queue_name: args[:queue_name].to_s.strip)
+      queue.enabled = true
+      queue.min_smtp_out = args[:min_smtp_out] if args[:min_smtp_out].present?
+      queue.max_smtp_out = args[:max_smtp_out] if args[:max_smtp_out].present?
+      queue.max_rcpt_per_message = args[:max_rcpt_per_message] if args[:max_rcpt_per_message].present?
+      queue.max_msg_rate = args[:max_msg_rate] if args[:max_msg_rate].present?
+
+      if queue.save
+        puts "✓ Queue #{queue.queue_name} saved"
+      else
+        puts "✗ #{queue.errors.full_messages.join(', ')}"
+        exit 1
+      end
+    end
+
+    desc "Add/update an MX rollup. Usage: rake 'postal:smtp_rollup:add_mx_rollup[mx.example.net,queue.name]'"
+    task :add_mx_rollup, [:mx_hostname, :rollup_name] => :environment do |_t, args|
+      hostname = args[:mx_hostname].to_s.strip.downcase.delete_suffix(".")
+      rollup = MXRollup.where("LOWER(mx_hostname) = ?", hostname).first_or_initialize
+      rollup.rollup_name = args[:rollup_name].to_s.strip
+      rollup.enabled = true
+
+      if rollup.save
+        puts "✓ MX rollup #{rollup.mx_hostname} -> #{rollup.rollup_name} saved"
+      else
+        puts "✗ #{rollup.errors.full_messages.join(', ')}"
+        exit 1
+      end
+    end
+
+    desc "Probe SMTP without DATA. Usage: rake 'postal:smtp_rollup:probe_smtp[user@example.net,queue.name,from@example.org]'"
+    task :probe_smtp, [:recipient, :queue_name, :mail_from] => :environment do |_t, args|
+      probe = SMTPConnectionProbe.new(
+        recipient: args[:recipient],
+        queue_name: args[:queue_name],
+        mail_from: args[:mail_from]
+      ).call
+
+      puts probe.summary
+      puts probe.transcript
+      exit 1 unless probe.connected
+    end
+
     desc "Set queue mode (normal|backoff). Usage: rake postal:smtp_rollup:set_queue_mode[queue,mode]"
     task :set_queue_mode, [:queue_name, :mode] => :environment do |_t, args|
       queue_name = args[:queue_name].to_s

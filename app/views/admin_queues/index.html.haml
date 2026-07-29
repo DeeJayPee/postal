@@ -2,13 +2,27 @@
 - page_title << "Global Queues"
 
 .pageHeader
-  %h1.pageHeader__title Global Queue Configuration
+  %h1.pageHeader__title Global Queues
 
 .pageContent
   %p.pageContent__intro.u-margin
-    Queue configuration and backoff rules are global across all organizations and servers.
+    Runtime queue sizes, global queue configuration, MX rollups, backoff rules, and SMTP diagnostics across all organizations and servers.
 
-  .u-margin
+  %dl.adminStats.u-margin
+    .adminStats__stat
+      %dt Global queue size
+      %dd= number_with_delimiter(@global_queue_size)
+    .adminStats__stat
+      %dt In rollups / queues
+      %dd= number_with_delimiter(@known_queue_size)
+    .adminStats__stat
+      %dt Rest
+      %dd= number_with_delimiter(@rest_queue_size)
+
+  %p.pageContent__text.u-margin
+    “Rest” contains every queued message whose virtual queue is blank, disabled, or no longer matches an enabled queue, MX rollup, or domain macro.
+
+  .u-margin#queue-configurations
     %h2.pageContent__subTitle Queue configurations
     - if @queue_configs.empty?
       %p.pageContent__text No enabled queue configurations found.
@@ -17,6 +31,7 @@
         %thead
           %tr
             %td Queue
+            %td Size
             %td Mode
             %td Max Msg Rate
             %td SMTP Out
@@ -32,6 +47,7 @@
               - auto_return = "#{config.backoff_auto_success_threshold} in #{distance_of_time_in_words(Time.current, Time.current + config.backoff_auto_success_window_seconds)}"
             %tr
               %td= config.queue_name
+              %td= number_with_delimiter(@queue_sizes[config.queue_name].to_i)
               %td= config.mode
               %td= config.max_msg_rate || "-"
               %td= "#{config.min_smtp_out}-#{config.max_smtp_out}"
@@ -44,12 +60,81 @@
                   = "-"
               %td= auto_return
               %td
-                - target_mode = config.backoff? ? "normal" : "backoff"
-                - label = config.backoff? ? "Set normal" : "Set backoff"
-                = button_to label,
-                            admin_set_queue_mode_path(queue_name: config.queue_name, mode: target_mode),
-                            method: :post,
-                            class: ["button", (config.backoff? ? "button--positive" : "button--danger")]
+                .buttonSet
+                  = link_to "Edit", admin_edit_queue_path(config), class: "button button--small"
+                  - target_mode = config.backoff? ? "normal" : "backoff"
+                  - label = config.backoff? ? "Set normal" : "Set backoff"
+                  = button_to label,
+                              admin_set_queue_mode_path(queue_name: config.queue_name, mode: target_mode),
+                              method: :post,
+                              class: ["button", "button--small", (config.backoff? ? "button--positive" : "button--danger")]
+
+  .row.row--2col.u-margin
+    .col.col--10.col--collapse
+      %h2.pageContent__subTitle Add a queue
+      = render "queue_form",
+               queue_configuration: @new_queue,
+               form_url: admin_create_queue_path,
+               submit_label: "Add queue",
+               queue_name_editable: true
+
+    .col.col--10.col--collapse
+      %h2.pageContent__subTitle Add an MX rollup
+      = render "rollup_form",
+               mx_rollup: @new_rollup,
+               queue_configs: @queue_configs,
+               form_url: admin_create_rollup_path,
+               submit_label: "Add MX rollup"
+
+  .u-margin#mx-rollups
+    %h2.pageContent__subTitle MX rollup mappings
+    - if @rollups.empty?
+      %p.pageContent__text No enabled MX rollups found.
+    - else
+      %table.dataTable.u-margin-half
+        %thead
+          %tr
+            %td MX hostname
+            %td Queue / rollup
+            %td Description
+            %td Action
+        %tbody
+          - @rollups.each do |rollup|
+            %tr
+              %td= rollup.mx_hostname
+              %td= rollup.rollup_name
+              %td= rollup.description.presence || "-"
+              %td= link_to "Edit", admin_edit_rollup_path(rollup), class: "button button--small"
+
+  .u-margin
+    %h2.pageContent__subTitle Force an SMTP connection
+    %p.pageContent__text.u-margin-half
+      Opens an SMTP session from this Postal host, runs EHLO/STARTTLS and the envelope commands, captures the remote response, then stops before DATA. No email is sent.
+    = form_with url: admin_smtp_probe_path, scope: :smtp_probe, local: true do |f|
+      %fieldset.fieldSet.fieldSet--compact.u-margin-half
+        .fieldSet__fieldPair
+          .fieldSet__field
+            = f.label :recipient, "Recipient to test", class: "fieldSet__label"
+            .fieldSet__input= f.email_field :recipient, value: @smtp_probe_values[:recipient], class: "input input--text", placeholder: "user@example.net", required: true
+          .fieldSet__field
+            = f.label :queue_name, "Queue override", class: "fieldSet__label"
+            .fieldSet__input
+              = f.select :queue_name,
+                         options_for_select(@queue_configs.map { |queue| [queue.queue_name, queue.queue_name] }, @smtp_probe_values[:queue_name]),
+                         { include_blank: "Resolve automatically" },
+                         class: "input input--select"
+        .fieldSet__field
+          = f.label :mail_from, "MAIL FROM (optional)", class: "fieldSet__label"
+          .fieldSet__input= f.email_field :mail_from, value: @smtp_probe_values[:mail_from], class: "input input--text", placeholder: "Empty envelope sender"
+      = f.submit "Connect and capture SMTP response", class: "button button--dark"
+
+    - if @smtp_probe_result
+      .u-margin
+        - probe_result_class = @smtp_probe_result.recipient_accepted ? "u-green u-bold" : (@smtp_probe_result.connected ? "u-orange u-bold" : "u-red u-bold")
+        %p{class: probe_result_class}= @smtp_probe_result.summary
+        - if @smtp_probe_result.endpoint
+          %p.pageContent__text= "Endpoint: #{@smtp_probe_result.endpoint}"
+        %pre.codeBlock.codeBlock--whitespace= @smtp_probe_result.transcript
 
   .u-margin
     %h2.pageContent__subTitle Loaded global backoff rules

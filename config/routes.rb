@@ -88,6 +88,13 @@ Rails.application.routes.draw do
   end
   get "admin/queues" => "admin_queues#index", as: :admin_queues
   post "admin/queues/set_mode" => "admin_queues#set_mode", as: :admin_set_queue_mode
+  post "admin/queues/queue" => "admin_queues#create_queue", as: :admin_create_queue
+  post "admin/queues/rollup" => "admin_queues#create_rollup", as: :admin_create_rollup
+  post "admin/queues/smtp_probe" => "admin_queues#smtp_probe", as: :admin_smtp_probe
+  get "admin/queues/configurations/:id/edit" => "admin_queues#edit_queue", as: :admin_edit_queue
+  patch "admin/queues/configurations/:id" => "admin_queues#update_queue", as: :admin_update_queue
+  get "admin/queues/rollups/:id/edit" => "admin_queues#edit_rollup", as: :admin_edit_rollup
+  patch "admin/queues/rollups/:id" => "admin_queues#update_rollup", as: :admin_update_rollup
 
   get "settings" => "user#edit"
   patch "settings" => "user#update"

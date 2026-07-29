@@ -49,10 +49,12 @@ module SMTPClient
     #
     # @param source_ip_address [IPAddress] the IP address to use as the source address for the connection
     # @param allow_ssl [Boolean] whether to allow SSL for this connection, if false SSL mode is ignored
+    # @param debug_output [IO, nil] optional IO which receives the Net::SMTP protocol transcript
     #
     # @return [Net::SMTP]
-    def start_smtp_session(source_ip_address: nil, allow_ssl: true)
+    def start_smtp_session(source_ip_address: nil, allow_ssl: true, debug_output: nil)
       @smtp_client = Net::SMTP.new(@ip_address, @server.port)
+      @smtp_client.set_debug_output(debug_output) if debug_output
       @smtp_client.open_timeout = Postal::Config.smtp_client.open_timeout
       @smtp_client.read_timeout = Postal::Config.smtp_client.read_timeout
       @smtp_client.tls_hostname = @server.hostname

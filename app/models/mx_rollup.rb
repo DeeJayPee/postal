@@ -14,14 +14,17 @@
 #
 
 class MXRollup < ApplicationRecord
-  validates :mx_hostname, presence: true
+  before_validation :normalize_mx_hostname
+
+  validates :mx_hostname, presence: true, uniqueness: { case_sensitive: false }
   validates :rollup_name, presence: true
 
   scope :enabled, -> { where(enabled: true) }
 
   # Find rollup name for a given MX hostname
   def self.find_rollup_for_mx(mx_hostname)
-    enabled.find_by(mx_hostname: mx_hostname)&.rollup_name
+    normalized_hostname = mx_hostname.to_s.downcase.delete_suffix(".")
+    enabled.where("LOWER(mx_hostname) = ?", normalized_hostname).first&.rollup_name
   end
 
   # Import rollups from PowerMTA-style configuration
@@ -38,5 +41,12 @@ class MXRollup < ApplicationRecord
         end
       end
     end
+  end
+
+  private
+
+  def normalize_mx_hostname
+    self.mx_hostname = mx_hostname.to_s.strip.downcase.delete_suffix(".")
+    self.rollup_name = rollup_name.to_s.strip
   end
 end

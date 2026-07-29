@@ -1,0 +1,19 @@
+- page_title << "Admin"
+- page_title << "Global Queues"
+- page_title << @mx_rollup.mx_hostname
+
+.pageHeader
+  %h1.pageHeader__title
+    %span.pageHeader__titlePrevious
+      = link_to "Global Queues", admin_queues_path(anchor: "mx-rollups")
+      &rarr;
+      = @mx_rollup.mx_hostname
+      &rarr;
+    Edit MX rollup
+
+.pageContent.pageContent--compact
+  = render "rollup_form",
+           mx_rollup: @mx_rollup,
+           queue_configs: @queue_configs,
+           form_url: admin_update_rollup_path(@mx_rollup),
+           submit_label: "Update MX rollup"

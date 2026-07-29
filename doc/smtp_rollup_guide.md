@@ -220,6 +220,35 @@ Example:
 
 ## Management Commands
 
+### Add One Queue or MX Rollup
+
+The web UI is available to administrators at `/admin/queues`. It supports
+creating and editing queue settings and MX mappings; queue names are immutable
+after creation. The same changes can be made from a shell without editing an
+import file:
+
+```bash
+# Add or update a queue:
+bundle exec rake 'postal:smtp_rollup:add_queue[orange.queue,1,3,100,2000/h]'
+
+# Arguments: MX hostname, queue/rollup name
+bundle exec rake 'postal:smtp_rollup:add_mx_rollup[smtp-in.orange.fr,orange.queue]'
+```
+
+Omit trailing queue arguments to keep model defaults. The queue command arguments
+are: name, minimum SMTP connections, maximum SMTP connections, maximum recipients
+per message, and maximum message rate.
+
+To perform the same non-delivery SMTP diagnostic as the admin page:
+
+```bash
+bundle exec rake 'postal:smtp_rollup:probe_smtp[user@orange.fr,orange.queue,probe@example.org]'
+```
+
+The probe prints the SMTP transcript and stops before `DATA`, so it does not send
+a message. The queue and MAIL FROM arguments are optional; use empty positions
+when only automatic queue resolution is wanted.
+
 ### View Statistics
 
 ```bash

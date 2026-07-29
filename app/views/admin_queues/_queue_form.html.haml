@@ -1,0 +1,49 @@
+= form_with model: queue_configuration,
+            url: form_url,
+            method: queue_configuration.persisted? ? :patch : :post,
+            local: true do |f|
+  = f.error_messages
+  %fieldset.fieldSet.fieldSet--compact.u-margin-half
+    .fieldSet__field
+      = f.label :queue_name, "Queue name", class: "fieldSet__label"
+      - if queue_name_editable
+        .fieldSet__input= f.text_field :queue_name, class: "input input--text", placeholder: "orange.queue", required: true
+      - else
+        .fieldSet__input
+          = f.text_field :queue_name, class: "input input--text", disabled: true
+          %p.fieldSet__text Queue names cannot be changed because rollups, domain macros, and queued messages may reference them.
+    .fieldSet__fieldPair
+      .fieldSet__field
+        = f.label :min_smtp_out, "Min SMTP out", class: "fieldSet__label"
+        .fieldSet__input= f.number_field :min_smtp_out, class: "input input--text", min: 1, required: true
+      .fieldSet__field
+        = f.label :max_smtp_out, "Max SMTP out", class: "fieldSet__label"
+        .fieldSet__input= f.number_field :max_smtp_out, class: "input input--text", min: 1, required: true
+    .fieldSet__fieldPair
+      .fieldSet__field
+        = f.label :max_rcpt_per_message, "Max recipients", class: "fieldSet__label"
+        .fieldSet__input= f.number_field :max_rcpt_per_message, class: "input input--text", min: 1, required: true
+      .fieldSet__field
+        = f.label :max_msg_rate, "Max message rate", class: "fieldSet__label"
+        .fieldSet__input= f.text_field :max_msg_rate, class: "input input--text", placeholder: "2000/h"
+    .fieldSet__fieldPair
+      .fieldSet__field
+        = f.label :mode, class: "fieldSet__label"
+        .fieldSet__input= f.select :mode, QueueConfiguration::MODES, {}, class: "input input--select"
+      .fieldSet__field
+        = f.label :backoff_base_delay_seconds, "Backoff delay (seconds)", class: "fieldSet__label"
+        .fieldSet__input= f.number_field :backoff_base_delay_seconds, class: "input input--text", min: 1
+    .fieldSet__field
+      = f.label :backoff_reroute_to, "Backoff relay", class: "fieldSet__label"
+      .fieldSet__input= f.text_field :backoff_reroute_to, class: "input input--text", placeholder: "relay.example.com"
+    .fieldSet__fieldPair
+      .fieldSet__field
+        = f.label :backoff_auto_success_threshold, "Auto-return successes", class: "fieldSet__label"
+        .fieldSet__input= f.number_field :backoff_auto_success_threshold, class: "input input--text", min: 1
+      .fieldSet__field
+        = f.label :backoff_auto_success_window_seconds, "Success window (seconds)", class: "fieldSet__label"
+        .fieldSet__input= f.number_field :backoff_auto_success_window_seconds, class: "input input--text", min: 1
+    .fieldSet__field
+      = f.label :description, class: "fieldSet__label"
+      .fieldSet__input= f.text_area :description, class: "input input--smallArea"
+  = f.submit submit_label, class: "button button--positive"

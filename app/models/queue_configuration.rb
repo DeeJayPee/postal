@@ -22,6 +22,8 @@
 class QueueConfiguration < ApplicationRecord
   MODES = %w[normal backoff].freeze
 
+  before_validation :normalize_queue_name
+
   validates :queue_name, presence: true, uniqueness: true
   validates :min_smtp_out, numericality: { greater_than_or_equal_to: 1 }
   validates :max_smtp_out, numericality: { greater_than_or_equal_to: 1 }
@@ -175,6 +177,10 @@ class QueueConfiguration < ApplicationRecord
   end
 
   private
+
+  def normalize_queue_name
+    self.queue_name = queue_name.to_s.strip
+  end
 
   def validate_max_msg_rate_format
     return if max_msg_rate.blank?

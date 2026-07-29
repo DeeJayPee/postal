@@ -1,0 +1,21 @@
+= form_with model: mx_rollup,
+            url: form_url,
+            method: mx_rollup.persisted? ? :patch : :post,
+            local: true do |f|
+  = f.error_messages
+  %fieldset.fieldSet.fieldSet--compact.u-margin-half
+    .fieldSet__field
+      = f.label :mx_hostname, "MX hostname", class: "fieldSet__label"
+      .fieldSet__input= f.text_field :mx_hostname, class: "input input--text", placeholder: "smtp-in.orange.fr", required: true
+    .fieldSet__field
+      = f.label :rollup_name, "Queue / rollup", class: "fieldSet__label"
+      .fieldSet__input
+        = f.select :rollup_name,
+                   options_for_select(queue_configs.map { |queue| [queue.queue_name, queue.queue_name] }, mx_rollup.rollup_name),
+                   { include_blank: "Select a queue" },
+                   class: "input input--select",
+                   required: true
+    .fieldSet__field
+      = f.label :description, class: "fieldSet__label"
+      .fieldSet__input= f.text_area :description, class: "input input--smallArea"
+  = f.submit submit_label, class: "button button--positive"

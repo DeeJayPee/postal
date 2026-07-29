@@ -1,0 +1,19 @@
+- page_title << "Admin"
+- page_title << "Global Queues"
+- page_title << @queue_configuration.queue_name
+
+.pageHeader
+  %h1.pageHeader__title
+    %span.pageHeader__titlePrevious
+      = link_to "Global Queues", admin_queues_path(anchor: "queue-configurations")
+      &rarr;
+      = @queue_configuration.queue_name
+      &rarr;
+    Edit queue
+
+.pageContent.pageContent--compact
+  = render "queue_form",
+           queue_configuration: @queue_configuration,
+           form_url: admin_update_queue_path(@queue_configuration),
+           submit_label: "Update queue",
+           queue_name_editable: false

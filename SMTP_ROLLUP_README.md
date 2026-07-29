@@ -153,6 +153,23 @@ domain-macro orange orange.fr,wanadoo.fr,orange.rollup
 
 ## Management Commands
 
+Administrators can create and edit queues and MX mappings, inspect runtime sizes,
+and run SMTP probes at `/admin/queues`. Queue names remain fixed after creation
+so existing mappings and queued messages keep their references.
+
+### Add a Queue or MX Rollup
+
+```bash
+bundle exec rake 'postal:smtp_rollup:add_queue[orange.queue,1,3,100,2000/h]'
+bundle exec rake 'postal:smtp_rollup:add_mx_rollup[smtp-in.orange.fr,orange.queue]'
+```
+
+Run a non-delivery SMTP envelope probe and print the full transcript:
+
+```bash
+bundle exec rake 'postal:smtp_rollup:probe_smtp[user@orange.fr,orange.queue,probe@example.org]'
+```
+
 ### Import Configurations
 
 ```bash
@@ -349,7 +366,7 @@ For issues or questions:
 ## Future Enhancements
 
 Potential future improvements:
-- Web UI for managing rollups
+- Edit and disable existing rollups from the web UI
 - Real-time queue statistics dashboard
 - Automatic MX rollup discovery
 - Rate limiting per queue

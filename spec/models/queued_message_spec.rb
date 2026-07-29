@@ -63,6 +63,20 @@ RSpec.describe QueuedMessage do
     end
   end
 
+  describe ".global_queue_summary" do
+    it "counts blank and stale virtual queue names as rest" do
+      create(:queued_message, virtual_queue: "known.queue")
+      create(:queued_message, virtual_queue: "stale.queue")
+      create(:queued_message, virtual_queue: nil)
+
+      expect(described_class.global_queue_summary(["known.queue"])).to eq(
+        total: 3,
+        known: 1,
+        rest: 2
+      )
+    end
+  end
+
   describe "#retry_now" do
     it "removes the retry time" do
       message = create(:queued_message, retry_after: 2.minutes.from_now)
