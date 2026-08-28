@@ -9,6 +9,7 @@ require File.expand_path("../config/environment", __dir__)
 require "rspec/rails"
 require "spec_helper"
 require "factory_bot"
+require "database_cleaner/active_record"
 require "timecop"
 require "webmock/rspec"
 require "shoulda-matchers"

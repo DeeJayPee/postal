@@ -1,0 +1,258 @@
+- page_title << "Admin"
+- page_title << "Global Queues"
+- page_title << @queue_configuration.queue_name
+- detail_status = @queue_configuration.backoff? ? "backoff" : (@queue_state&.next_attempt_at&.future? ? "deferred" : "normal")
+
+.pageHeader.queueDetailHeader
+  %h1.pageHeader__title
+    %span.pageHeader__titlePrevious
+      = link_to "Global Queues", admin_queues_path(tab: "overview")
+      = " / "
+    = @queue_configuration.queue_name
+  %span.queueStatus{class: "queueStatus--#{detail_status}"}= detail_status.humanize
+
+.pageContent
+  .queueDetailActions
+    .queueDetailActions__summary
+      - if @queue_configuration.backoff?
+        %strong Backoff
+        = @queue_configuration.backoff_started_at ? " for #{distance_of_time_in_words(@queue_configuration.backoff_started_at, Time.current)}" : " (start time unavailable)"
+        - if @backoff_trigger
+          %span.queueTable__description= "Cause: #{truncate(@backoff_trigger.smtp_response.presence || @backoff_trigger.details.presence || @backoff_trigger.source.humanize, length: 140)}"
+        %span.queueTable__description= "Next attempt: #{@queue_next_attempt ? @queue_next_attempt.to_fs(:long) : 'not scheduled'}"
+      - elsif @queue_next_attempt
+        = "Next queue attempt #{@queue_next_attempt.to_fs(:long)}"
+      - else
+        Normal delivery mode
+    .buttonSet
+      = button_to "Retry now",
+                  admin_retry_queue_path(queue_name: @queue_configuration.queue_name, return_to: admin_queue_path(@queue_configuration)),
+                  method: :post,
+                  class: "button button--dark",
+                  data: {confirm: "Make every unlocked delayed message in #{@queue_configuration.queue_name} eligible now?"}
+      - target_mode = @queue_configuration.backoff? ? "normal" : "backoff"
+      = button_to(@queue_configuration.backoff? ? "Set normal" : "Set backoff",
+                  admin_set_queue_mode_path(queue_name: @queue_configuration.queue_name, mode: target_mode, return_to: admin_queue_path(@queue_configuration)),
+                  method: :post,
+                  class: ["button", (@queue_configuration.backoff? ? "button--positive" : "button--danger")],
+                  data: {confirm: "Set #{@queue_configuration.queue_name} to #{target_mode} mode?"})
+      = link_to "Test delivery & trace", "#smtp-diagnostic", class: "button"
+      = link_to "Edit", admin_edit_queue_path(@queue_configuration), class: "button button--neutral"
+
+  - if @queue_configuration.backoff?
+    .queueIncident.u-margin
+      %h2.queueIncident__title Why is this queue in backoff?
+      - if @backoff_trigger
+        %p.queueIncident__response= @backoff_trigger.smtp_response.presence || @backoff_trigger.details.presence || "No SMTP response was captured."
+        %dl.queueIncident__facts
+          .queueIncident__fact
+            %dt Trigger
+            %dd= @backoff_trigger.rule_pattern.present? ? "/#{@backoff_trigger.rule_pattern}/" : @backoff_trigger.source.humanize
+          .queueIncident__fact
+            %dt Domain
+            %dd= @backoff_trigger.domain.presence || "-"
+          .queueIncident__fact
+            %dt Route
+            %dd= [@backoff_trigger.source_ip, @backoff_trigger.remote_endpoint].compact.join(" → ").presence || "-"
+          .queueIncident__fact
+            %dt First seen
+            %dd= @backoff_trigger.first_occurred_at.to_fs(:long)
+          .queueIncident__fact
+            %dt Last seen
+            %dd= @backoff_trigger_last_seen.to_fs(:long)
+          .queueIncident__fact
+            %dt References
+            %dd
+              = "log #{@backoff_trigger.log_id}" if @backoff_trigger.log_id.present?
+              = " · message ##{@backoff_trigger.message_id}" if @backoff_trigger.message_id.present?
+      - else
+        %p.queueIncident__response The queue entered backoff before structured history was enabled, or it was changed outside the observed transition path. Current state is available, but the original trigger is not.
+
+  %dl.adminStats.adminStats--queue.u-margin
+    .adminStats__stat
+      %dt Total
+      %dd= number_with_delimiter(@queue_runtime_detail[:total])
+    .adminStats__stat
+      %dt Ready
+      %dd= number_with_delimiter(@queue_runtime_detail[:ready])
+    .adminStats__stat
+      %dt Scheduled
+      %dd= number_with_delimiter(@queue_runtime_detail[:scheduled])
+    .adminStats__stat
+      %dt Sending / limit
+      %dd= "#{@queue_runtime_detail[:active_smtp_out]}/#{@queue_runtime_detail[:smtp_out_limit]}"
+    .adminStats__stat
+      %dt Oldest
+      %dd= @queue_runtime_detail[:oldest_at] ? "#{time_ago_in_words(@queue_runtime_detail[:oldest_at])} ago" : "-"
+    .adminStats__stat
+      %dt Next attempt
+      %dd= @queue_next_attempt ? @queue_next_attempt.to_fs(:short) : "-"
+
+  .u-margin
+    .queueSectionHeading
+      %h2.pageContent__subTitle Delivery outcomes
+      .buttonSet.queueRangePicker{aria: {label: "Activity range"}}
+        - AdminQueuesController::ACTIVITY_RANGES.keys.each do |range|
+          = link_to range, admin_queue_path(@queue_configuration, range: range), class: ["button", "button--small", (@activity_range == range ? "button--dark" : "button--neutral")]
+    = render "activity_chart", series: @activity_series, chart_id: "queue-detail-activity"
+    %dl.queueActivityTotals
+      - [["attempted", "Attempted"], ["sent", "Sent"], ["soft_fail", "Soft fail"], ["hard_fail", "Hard fail"], ["connect_error", "Connection errors"], ["rate_limited", "Rate limited"], ["backoff_matched", "Backoff matches"]].each do |key, label|
+        .queueActivityTotals__item
+          %dt= label
+          %dd= number_with_delimiter(@activity_totals.fetch(key.to_sym))
+
+  .u-margin
+    %h2.pageContent__subTitle Event history
+    = form_with url: admin_queue_path(@queue_configuration), method: :get, local: true, class: "queueFilters queueFilters--events" do |f|
+      = hidden_field_tag :range, @activity_range
+      .queueFilters__field
+        = f.label :event_type, "Event", class: "fieldSet__label"
+        = f.select :event_type,
+                   options_for_select([["All events", ""]] + SMTPQueueEvent::EVENT_TYPES.map { |type| [type.humanize, type] }, params[:event_type]),
+                   {},
+                   class: "input input--select"
+      .queueFilters__field
+        = f.label :category, "Category", class: "fieldSet__label"
+        = f.select :category,
+                   options_for_select([["All categories", ""]] + @event_categories.map { |category| [category.humanize, category] }, params[:category]),
+                   {},
+                   class: "input input--select"
+      .queueFilters__field
+        = f.label :domain, "Domain", class: "fieldSet__label"
+        = f.text_field :domain, value: params[:domain], class: "input input--text", placeholder: "example.net"
+      .queueFilters__field
+        = f.label :event_query, "Response, details, or log ID", class: "fieldSet__label"
+        = f.search_field :event_query, value: params[:event_query], class: "input input--text", placeholder: "421, timeout, AB12CD34…"
+      .queueFilters__actions
+        = f.submit "Filter", class: "button button--dark"
+        = link_to "Reset", admin_queue_path(@queue_configuration, range: @activity_range), class: "button button--neutral"
+
+    - if @queue_events.empty?
+      .noData.noData--clean
+        %h3.noData__title No queue events for these filters.
+        %p.noData__text New mode changes, delivery issues, retries, and diagnostics will appear here.
+    - else
+      .queueTableWrap
+        %table.dataTable.queueEvents
+          %thead
+            %tr
+              %td Last occurrence
+              %td Event
+              %td Domain
+              %td Route
+              %td Count
+              %td Context
+          %tbody
+            - @queue_events.each do |event|
+              %tr{class: (event.severity == "error" ? "dataTable__redRow" : nil)}
+                %td.text-nowrap= event.last_occurred_at.to_fs(:short)
+                %td
+                  %strong= event.event_type.humanize
+                  %span.queueTable__description= [event.category&.humanize, event.source&.humanize].compact.join(" · ")
+                %td= event.domain.presence || "-"
+                %td= [event.source_ip, event.remote_endpoint].compact.join(" → ").presence || "-"
+                %td= number_with_delimiter(event.occurrence_count)
+                %td
+                  %details.queueEventDetails
+                    %summary= truncate(event.smtp_response.presence || event.details.presence || "View details", length: 120)
+                    %dl.pageContent__definitions
+                      - if event.rule_pattern.present?
+                        %dt Matched rule
+                        %dd
+                          %code= "/#{event.rule_pattern}/"
+                      %dt First occurrence
+                      %dd= event.first_occurred_at.to_fs(:long)
+                      %dt Last occurrence
+                      %dd= event.last_occurred_at.to_fs(:long)
+                      %dt SMTP response
+                      %dd= event.smtp_response.presence || "-"
+                      %dt Details
+                      %dd= event.details.presence || "-"
+                      %dt References
+                      %dd= [event.log_id && "log #{event.log_id}", event.message_id && "message ##{event.message_id}", event.server_id && "server ##{event.server_id}"].compact.join(" · ").presence || "-"
+                      %dt Actor
+                      %dd= event.actor&.name.presence || event.source.humanize
+                      %dt Retry at
+                      %dd= event.retry_at ? event.retry_at.to_fs(:long) : "-"
+      = paginate @queue_events, param_name: :event_page
+
+  .queueDashboardGrid.u-margin
+    .queueDashboardGrid__main
+      %h2.pageContent__subTitle Queued messages
+      - if @queue_messages.empty?
+        %p.pageContent__text This queue is empty.
+      - else
+        .queueTableWrap
+          %table.dataTable
+            %thead
+              %tr
+                %td Message
+                %td Domain
+                %td Organization / server
+                %td Age
+                %td Attempts
+                %td Source IP
+                %td State
+                %td Next retry
+            %tbody
+              - @queue_messages.each do |message|
+                %tr
+                  %td
+                    - if message.server&.organization
+                      = link_to "##{message.message_id}", organization_server_message_path(message.server.organization, message.server, message.message_id), class: "u-link"
+                    - else
+                      = "##{message.message_id}"
+                  %td= message.domain.presence || "-"
+                  %td= message.server&.organization ? "#{message.server.organization.name} / #{message.server.name}" : "-"
+                  %td= message.created_at ? "#{time_ago_in_words(message.created_at)} ago" : "-"
+                  %td= message.attempts
+                  %td= message.ip_address&.ipv4.presence || message.ip_address&.ipv6.presence || "-"
+                  %td
+                    - if message.locked_at
+                      Sending / locked
+                    - elsif message.retry_after && message.retry_after >= 30.seconds.ago
+                      Scheduled
+                    - else
+                      Ready
+                  %td= message.retry_after ? message.retry_after.to_fs(:short) : "-"
+        = paginate @queue_messages, param_name: :message_page
+    .queueDashboardGrid__side
+      %h2.pageContent__subTitle Top domains
+      - if @queue_domains.empty?
+        %p.pageContent__text No queued domains.
+      - else
+        %table.dataTable.dataTable--compact
+          %thead
+            %tr
+              %td Domain
+              %td Total
+              %td Ready
+              %td Scheduled
+              %td Oldest
+          %tbody
+            - @queue_domains.each do |domain|
+              %tr
+                %td= domain[:domain].presence || "-"
+                %td= number_with_delimiter(domain[:total])
+                %td= number_with_delimiter(domain[:ready])
+                %td= number_with_delimiter(domain[:scheduled])
+                %td= domain[:oldest_at] ? "#{time_ago_in_words(domain[:oldest_at])} ago" : "-"
+
+  .u-margin#smtp-diagnostic
+    = render "smtp_probe", queue_locked: true, return_queue_id: @queue_configuration.id
+
+  .u-margin.queueConfigurationSummary
+    .queueSectionHeading
+      %h2.pageContent__subTitle Configuration summary
+      = link_to "Edit configuration", admin_edit_queue_path(@queue_configuration), class: "button button--small"
+    %dl.pageContent__definitions
+      %dt Description
+      %dd= @queue_configuration.description.presence || "-"
+      %dt Normal / backoff SMTP out
+      %dd= "#{@queue_configuration.max_smtp_out} / #{@queue_configuration.backoff_max_smtp_out}"
+      %dt Message rate
+      %dd= @queue_configuration.max_msg_rate.presence || "Unlimited"
+      %dt Normal / backoff retry
+      %dd= "#{@queue_configuration.retry_after} / #{@queue_configuration.backoff_retry_after}"
+      %dt Backoff relay
+      %dd= @queue_configuration.backoff_reroute_to.presence || "-"

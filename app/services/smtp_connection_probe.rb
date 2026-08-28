@@ -93,6 +93,7 @@ class SMTPConnectionProbe
   end
 
   def probe_endpoint(endpoint, domain, resolved_queue)
+    recipient_accepted = false
     begin
       smtp = endpoint.start_smtp_session(debug_output: @transcript)
     rescue OpenSSL::SSL::SSLError => e
@@ -103,12 +104,20 @@ class SMTPConnectionProbe
       smtp = endpoint.start_smtp_session(allow_ssl: false, debug_output: @transcript)
     end
 
-    response = smtp.send_message(diagnostic_message, @mail_from, [@recipient])
+    smtp.mailfrom(@mail_from)
+    smtp.rcptto(@recipient)
+    recipient_accepted = true
+    response = smtp.data(diagnostic_message)
     append_line("Message accepted: #{response.string.to_s.strip}")
     result(true, true, "The diagnostic email was accepted for delivery.", domain, resolved_queue, endpoint)
   rescue Net::SMTPError => e
     append_line("#{e.class}: #{e.message}")
-    result(true, false, "SMTP connected, but the diagnostic email was rejected: #{e.message}", domain, resolved_queue, endpoint)
+    if recipient_accepted
+      summary = "SMTP accepted RCPT TO, but rejected the diagnostic message DATA: #{e.message}"
+    else
+      summary = "SMTP connected, but rejected the diagnostic recipient: #{e.message}"
+    end
+    result(true, recipient_accepted, summary, domain, resolved_queue, endpoint)
   rescue StandardError => e
     append_line("#{e.class}: #{e.message}")
     nil

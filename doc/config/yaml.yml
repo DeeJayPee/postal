@@ -33,6 +33,8 @@ postal:
   allowed_request_destinations: []
   # The number of days after which to consider a lock as stale. Messages with stale locks will be removed and not retried.
   queued_message_lock_stale_days: 1
+  # The number of days to retain SMTP queue events and activity buckets
+  queue_observability_retention_days: 30
   # When enabled queued messages will be de-queued in batches based on their destination
   batch_queued_messages: true
   # When de-queuing in batches, use this limit for the batch size

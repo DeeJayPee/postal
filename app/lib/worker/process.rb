@@ -38,6 +38,7 @@ module Worker
       CleanupAuthieSessionsScheduledTask,
       ExpireHeldMessagesScheduledTask,
       ProcessMessageRetentionScheduledTask,
+      PruneSMTPQueueObservabilityScheduledTask,
       PruneSuppressionListsScheduledTask,
       PruneWebhookRequestsScheduledTask,
       SendNotificationsScheduledTask,

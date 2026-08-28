@@ -376,6 +376,20 @@ module MessageDequeuer
         expect { processor.process }.to change { server.message_db.live_stats.total(60) }.from(0).to(1)
       end
 
+      it "records activity for the Rest queue when no virtual queue is assigned" do
+        processor.process
+
+        bucket = SMTPQueueActivityBucket.find_by!(
+          queue_name: SMTPQueueActivityBucket::REST_QUEUE_NAME,
+          bucket_started_at: Time.current.change(sec: 0)
+        )
+
+        expect(bucket).to have_attributes(
+          attempted_count: 1,
+          sent_count: 1
+        )
+      end
+
       context "when there is an IP address assigned to the queued message" do
         let(:ip) { create(:ip_address) }
         let(:queued_message) { create(:queued_message, :locked, message: message, ip_address: ip) }
@@ -416,6 +430,53 @@ module MessageDequeuer
           ).and_return(mocked_sender)
 
           processor.process
+        end
+
+        it "records one activity result for the SMTP attempt" do
+          QueueConfiguration.create!(queue_name: "example.queue", mode: "normal")
+
+          processor.process
+
+          bucket = SMTPQueueActivityBucket.find_by!(queue_name: "example.queue")
+          expect(bucket).to have_attributes(attempted_count: 1, sent_count: 1)
+        end
+
+        it "captures the triggering SMTP context and enters backoff" do
+          queue = QueueConfiguration.create!(queue_name: "example.queue", mode: "normal")
+          rule = BackoffRule.create!(
+            pattern: "temporarily rate limited",
+            action: BackoffRule::ACTION_MODE_BACKOFF,
+            enabled: true
+          )
+          send_result.type = "SoftFail"
+          send_result.retry = true
+          send_result.output = "421 user@example.com temporarily rate limited"
+          send_result.details = "Deferred by remote MX"
+          send_result.source_ip = "192.0.2.10"
+          send_result.remote_endpoint = "mx.example.com (192.0.2.20)"
+          send_result.log_id = "TRACE123"
+
+          processor.process
+
+          expect(queue.reload).to be_backoff
+          entered = SMTPQueueEvent.find_by!(queue_name: queue.queue_name, event_type: "backoff_entered")
+          expect(entered).to have_attributes(
+            backoff_rule_id: rule.id,
+            domain: "example.com",
+            source_ip: "192.0.2.10",
+            remote_endpoint: "mx.example.com (192.0.2.20)",
+            log_id: "TRACE123"
+          )
+          expect(entered.smtp_response).to eq("421 ***@example.com temporarily rate limited")
+          expect(SMTPQueueEvent.where(queue_name: queue.queue_name, event_type: "delivery_issue").sole).to have_attributes(
+            category: "backoff_rule",
+            occurrence_count: 1
+          )
+          expect(SMTPQueueActivityBucket.find_by!(queue_name: queue.queue_name)).to have_attributes(
+            attempted_count: 1,
+            soft_fail_count: 1,
+            backoff_matched_count: 1
+          )
         end
       end
 

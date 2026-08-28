@@ -146,6 +146,7 @@ module MessageDequeuer
       @result = sender.send_message(queued_message.message)
       apply_backoff_rule_to_sender_result
       update_queue_backoff_success_tracking
+      record_queue_observability
       @state.record_send_result(@result)
       return unless @result.connect_error
 
@@ -174,15 +175,26 @@ module MessageDequeuer
       rule ||= BackoffRule.match_for_response(@result.details.to_s)
       return unless rule
 
+      @matched_backoff_rule = rule
+      @result.backoff_matched = true
+
       case rule.action
       when BackoffRule::ACTION_MODE_BACKOFF
-        queue_config.enter_backoff! unless queue_config.backoff?
+        queue_config.enter_backoff!(
+          source: "smtp_rule",
+          rule: rule,
+          result: @result,
+          queued_message: queued_message
+        )
         queue_config.register_backoff_failure!
-        @result.retry = if queue_config.backoff_relay_server
-                          1
-                        else
-                          queued_message.calculate_retry_time(queued_message.attempts, queue_config.effective_backoff_base_delay).to_i
-                        end
+        if queue_config.backoff_relay_server
+          @result.retry = 1
+        else
+          @result.retry = queued_message.calculate_retry_time(
+            queued_message.attempts,
+            queue_config.effective_backoff_base_delay
+          ).to_i
+        end
         @result.queue_retry_after = @result.retry if queue_config.backoff_relay_server
       when BackoffRule::ACTION_BOUNCE_RCPT
         @result.type = "HardFail"
@@ -199,10 +211,42 @@ module MessageDequeuer
       return unless queue_config&.backoff?
 
       if @result.type == "Sent"
-        queue_config.register_backoff_success!
+        queue_config.register_backoff_success!(result: @result, queued_message: queued_message)
       else
         queue_config.register_backoff_failure!
       end
+    end
+
+    def record_queue_observability
+      return if @result.nil?
+
+      queue_name = queued_message.virtual_queue.presence || SMTPQueueActivityBucket::REST_QUEUE_NAME
+
+      SMTPQueueActivityBucket.record_result!(queue_name: queue_name, result: @result)
+      return if @result.type == "Sent"
+
+      queue_config = QueueConfiguration.find_for_queue(queued_message.virtual_queue)
+      return unless queue_config
+
+      SMTPQueueEvent.record_delivery_issue!(
+        queue_configuration: queue_config,
+        category: queue_issue_category,
+        result: @result,
+        queued_message: queued_message,
+        rule: @matched_backoff_rule,
+        source: @matched_backoff_rule ? "smtp_rule" : "scheduler"
+      )
+    rescue StandardError => e
+      Postal.logger.error "Could not record SMTP queue event: #{e.class}: #{e.message}", queue: queue_name
+    end
+
+    def queue_issue_category
+      return "rate_limited" if @result.rate_limited
+      return "backoff_rule" if @matched_backoff_rule
+      return "connect_error" if @result.connect_error
+      return "hard_fail" if @result.type == "HardFail"
+
+      "soft_fail"
     end
 
     def add_recipient_to_suppression_list_on_too_many_hard_fails

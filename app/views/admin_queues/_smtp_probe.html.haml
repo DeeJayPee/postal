@@ -1,0 +1,42 @@
+- queue_locked = local_assigns.fetch(:queue_locked, false)
+- return_queue_id = local_assigns[:return_queue_id]
+.queueDiagnostic
+  %h2.pageContent__subTitle Deliver a real diagnostic email
+  %p.pageContent__text
+    This sends a real email, including DATA, through the selected queue. The transcript is displayed only in this response and is not retained.
+    A successful RCPT automatically returns a backoff queue to normal mode.
+  = form_with url: admin_smtp_probe_path, scope: :smtp_probe, local: true do |f|
+    = hidden_field_tag :queue_id, return_queue_id if return_queue_id
+    %fieldset.fieldSet.fieldSet--compact.u-margin-half
+      .fieldSet__fieldPair
+        .fieldSet__field
+          = f.label :recipient, "Recipient to test", class: "fieldSet__label"
+          .fieldSet__input= f.email_field :recipient, value: @smtp_probe_values[:recipient], class: "input input--text", placeholder: "user@example.net", required: true
+        .fieldSet__field
+          = f.label :queue_name, "Queue", class: "fieldSet__label"
+          .fieldSet__input
+            - if queue_locked
+              = f.hidden_field :queue_name, value: @smtp_probe_values[:queue_name]
+              %input.input.input--text{value: @smtp_probe_values[:queue_name], disabled: true}
+            - else
+              = f.select :queue_name,
+                         options_for_select(@queue_configs.map { |queue| [queue.queue_name, queue.queue_name] }, @smtp_probe_values[:queue_name]),
+                         {include_blank: "Select a queue"},
+                         class: "input input--select",
+                         required: true
+      .fieldSet__field
+        = f.label :mail_from, "MAIL FROM", class: "fieldSet__label"
+        .fieldSet__input= f.email_field :mail_from, value: @smtp_probe_values[:mail_from], class: "input input--text", placeholder: "sender@example.com", required: true
+    = f.submit "Send diagnostic email", class: "button button--dark", data: {confirm: "This sends a real email. If accepted, this queue will return to normal mode. Continue?"}
+
+  - if @smtp_probe_result
+    .queueDiagnostic__result.u-margin
+      - probe_result_class = @smtp_probe_result.recipient_accepted ? "u-green u-bold" : (@smtp_probe_result.connected ? "u-orange u-bold" : "u-red u-bold")
+      %p{class: probe_result_class}= @smtp_probe_result.summary
+      - if @smtp_probe_result.endpoint
+        %p.pageContent__text= "Endpoint: #{@smtp_probe_result.endpoint}"
+      - if @smtp_probe_recovered_queue
+        %p.u-green.u-bold= "#{@smtp_probe_recovered_queue} returned to normal mode after the successful delivery."
+      .buttonSet.u-margin-half
+        %button.button.button--small.js-copy-queue-transcript{type: "button", data: {target: "queue-diagnostic-transcript"}} Copy transcript
+      %pre.codeBlock.codeBlock--whitespace{id: "queue-diagnostic-transcript"}= @smtp_probe_result.transcript

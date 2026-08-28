@@ -4,226 +4,269 @@
 .pageHeader
   %h1.pageHeader__title Global Queues
 
+%nav.navBar.navBar--secondary{aria: {label: "Queue administration"}}
+  %ul
+    - [["overview", "Overview"], ["configurations", "Configuration"], ["rollups", "MX rollups"], ["rules", "Backoff rules"], ["diagnostics", "Diagnostics"]].each do |tab, label|
+      %li.navBar__item
+        = link_to label, admin_queues_path(tab: tab), class: ["navBar__link", (@active_tab == tab ? "is-active" : nil)]
+
 .pageContent
-  %p.pageContent__intro.u-margin
-    Runtime queue sizes, global queue configuration, MX rollups, backoff rules, and SMTP diagnostics across all organizations and servers.
+  - if @active_tab == "overview"
+    .queueCockpit.js-queue-cockpit{data: {runtime_url: admin_queues_runtime_path(format: :json)}}
+      .queueCockpit__heading
+        %div
+          %p.pageContent__intro Queue health and delivery pressure across every organization and server.
+          %p.queueCockpit__freshness
+            Snapshot
+            %strong.js-queue-snapshot= @queue_snapshot_at.to_fs(:long)
+            · auto-refresh every 30 seconds while this tab is visible
+        = link_to "Refresh now", admin_queues_path(tab: "overview", queue_query: params[:queue_query], queue_status: params[:queue_status], queue_sort: params[:queue_sort]), class: "button button--small"
 
-  %dl.adminStats.u-margin
-    .adminStats__stat
-      %dt Global queue size
-      %dd= number_with_delimiter(@global_queue_size)
-    .adminStats__stat
-      %dt Ready now
-      %dd= number_with_delimiter(@global_runtime[:ready])
-    .adminStats__stat
-      %dt Scheduled
-      %dd= number_with_delimiter(@global_runtime[:scheduled])
-    .adminStats__stat
-      %dt Sending / locked
-      %dd= number_with_delimiter(@global_runtime[:locked])
-    .adminStats__stat
-      %dt In rollups / queues
-      %dd= number_with_delimiter(@known_queue_size)
-    .adminStats__stat
-      %dt Rest
-      %dd= number_with_delimiter(@rest_queue_size)
+      %dl.adminStats.adminStats--queue.u-margin
+        .adminStats__stat
+          %dt Total queued
+          %dd{data: {queue_stat: "total"}}= number_with_delimiter(@global_queue_size)
+        .adminStats__stat
+          %dt Ready now
+          %dd{data: {queue_stat: "ready"}}= number_with_delimiter(@global_runtime[:ready])
+        .adminStats__stat
+          %dt Scheduled
+          %dd{data: {queue_stat: "scheduled"}}= number_with_delimiter(@global_runtime[:scheduled])
+        .adminStats__stat
+          %dt Sending / locked
+          %dd{data: {queue_stat: "locked"}}= number_with_delimiter(@global_runtime[:locked])
+        .adminStats__stat.adminStats__stat--warning
+          %dt In backoff
+          %dd{data: {queue_stat: "backoff"}}= number_with_delimiter(@backoff_queue_count)
+        .adminStats__stat
+          %dt Rest
+          %dd{data: {queue_stat: "rest"}}= number_with_delimiter(@rest_queue_size)
 
-  %p.pageContent__text.u-margin
-    “Rest” contains every queued message whose virtual queue is blank, disabled, or no longer matches an enabled queue, MX rollup, or domain macro.
-    Counts are a snapshot from
-    = succeed "." do
-      %strong= @queue_snapshot_at.to_fs(:long)
-    = link_to "Refresh now", admin_queues_path, class: "u-link"
-    Rest currently has
-    = succeed " ready," do
-      %strong= number_with_delimiter(@rest_runtime[:ready])
-    = succeed " scheduled, and" do
-      %strong= number_with_delimiter(@rest_runtime[:scheduled])
-    = succeed " locked." do
-      %strong= number_with_delimiter(@rest_runtime[:locked])
+      .queueCockpit__filters.u-margin
+        = form_with url: admin_queues_path, method: :get, local: true, class: "queueFilters" do |f|
+          = hidden_field_tag :tab, "overview"
+          .queueFilters__field
+            = f.label :queue_query, "Search queues", class: "fieldSet__label"
+            = f.search_field :queue_query, value: params[:queue_query], class: "input input--text", placeholder: "Queue name or description"
+          .queueFilters__field
+            = f.label :queue_status, "Status", class: "fieldSet__label"
+            = f.select :queue_status,
+                       options_for_select([["All", ""], ["Needs attention", "attention"], ["Backoff", "backoff"], ["Deferred", "deferred"], ["Normal", "normal"], ["Rest only", "rest"]], params[:queue_status]),
+                       {},
+                       class: "input input--select"
+          .queueFilters__field
+            = f.label :queue_sort, "Sort", class: "fieldSet__label"
+            = f.select :queue_sort,
+                       options_for_select([["Needs attention", "priority"], ["Largest backlog", "volume"], ["Oldest message", "oldest"], ["Queue name", "name"]], params[:queue_sort]),
+                       {},
+                       class: "input input--select"
+          .queueFilters__actions
+            = f.submit "Apply", class: "button button--dark"
+            = link_to "Reset", admin_queues_path(tab: "overview"), class: "button button--neutral"
 
-  .u-margin#rest-queue
-    %table.dataTable.u-margin-half
-      %thead
-        %tr
-          %td Queue
-          %td Total
-          %td Ready
-          %td Scheduled
-          %td Locked
-          %td Next attempt
-          %td Action
-      %tbody
-        %tr
-          %td Rest
-          %td= number_with_delimiter(@rest_runtime[:total])
-          %td= number_with_delimiter(@rest_runtime[:ready])
-          %td= number_with_delimiter(@rest_runtime[:scheduled])
-          %td= number_with_delimiter(@rest_runtime[:locked])
-          %td= @rest_runtime[:next_attempt_at] ? @rest_runtime[:next_attempt_at].to_fs(:short) : "-"
-          %td
-            .buttonSet
-              = button_to "Retry now",
-                          admin_retry_rest_queue_path,
-                          method: :post,
-                          class: "button button--small button--dark",
-                          data: { confirm: "Make every unlocked delayed Rest message eligible for the next worker run?" }
-              = link_to "Debug", admin_debug_rest_queue_path, class: "button button--small"
-              = button_to "Refresh assignments",
-                          admin_refresh_queue_assignments_path(after_id: @reclassify_after),
-                          method: :post,
-                          class: "button button--small button--dark",
-                          data: { confirm: "Resolve current recipient MX records and reclassify up to 1,000 pending messages?" }
+      .queueCockpit__table.u-margin
+        %h2.pageContent__subTitle Queue status
+        .queueTableWrap
+          %table.dataTable.queueTable
+            %thead
+              %tr
+                %td Queue
+                %td Status
+                %td Backlog
+                %td Oldest
+                %td Activity · 1 h
+                %td SMTP out
+                %td Next attempt
+                %td Latest incident
+                %td Actions
+            %tbody
+              - @queue_rows.each do |row|
+                - config = row[:config]
+                - runtime = row[:runtime]
+                - latest_event = row[:latest_event]
+                - next_attempt = [runtime[:next_attempt_at], runtime[:queue_next_attempt_at]].compact.max
+                %tr{class: (row[:status] == "backoff" ? "queueTable__attentionRow" : nil), data: {queue_name: config.queue_name}}
+                  %td
+                    = link_to config.queue_name, admin_queue_path(config), class: "u-link u-bold"
+                    - if config.description.present?
+                      %span.queueTable__description= truncate(config.description, length: 80)
+                  %td
+                    %span.queueStatus{class: "queueStatus--#{row[:status]}", data: {queue_value: "status"}}= row[:status].humanize
+                  %td
+                    %strong{data: {queue_value: "total"}}= number_with_delimiter(runtime[:total])
+                    %span.queueTable__secondary
+                      %span{data: {queue_value: "ready"}}= number_with_delimiter(runtime[:ready])
+                      ready ·
+                      %span{data: {queue_value: "scheduled"}}= number_with_delimiter(runtime[:scheduled])
+                      scheduled ·
+                      %span{data: {queue_value: "locked"}}= number_with_delimiter(runtime[:locked])
+                      sending
+                  %td{data: {queue_value: "oldest"}}= runtime[:oldest_at] ? "#{time_ago_in_words(runtime[:oldest_at])} ago" : "-"
+                  %td
+                    %span.queueActivityNumbers.queueActivityNumbers--sent= "#{number_with_delimiter(row[:activity][:sent])} sent"
+                    %span.queueActivityNumbers.queueActivityNumbers--soft= "#{number_with_delimiter(row[:activity][:soft_fail])} soft"
+                    %span.queueActivityNumbers.queueActivityNumbers--hard= "#{number_with_delimiter(row[:activity][:hard_fail])} hard"
+                  %td{data: {queue_value: "smtp"}}= "#{runtime[:active_smtp_out]}/#{runtime[:smtp_out_limit]}"
+                  %td{data: {queue_value: "next_attempt"}}= next_attempt ? next_attempt.to_fs(:short) : "-"
+                  %td
+                    - if latest_event
+                      %strong= latest_event.event_type.humanize
+                      %span.queueTable__description= truncate(latest_event.smtp_response.presence || latest_event.details, length: 110)
+                    - elsif runtime[:last_error].present?
+                      = truncate(runtime[:last_error], length: 130)
+                    - else
+                      -
+                  %td
+                    .buttonSet
+                      = link_to "Open", admin_queue_path(config), class: "button button--small"
+                      = button_to "Retry",
+                                  admin_retry_queue_path(queue_name: config.queue_name, return_to: request.fullpath),
+                                  method: :post,
+                                  class: "button button--small button--dark",
+                                  data: {confirm: "Make every unlocked delayed message in #{config.queue_name} eligible now?"}
+                      - target_mode = config.backoff? ? "normal" : "backoff"
+                      = button_to(config.backoff? ? "Set normal" : "Set backoff",
+                                  admin_set_queue_mode_path(queue_name: config.queue_name, mode: target_mode, return_to: request.fullpath),
+                                  method: :post,
+                                  class: ["button", "button--small", (config.backoff? ? "button--positive" : "button--danger")],
+                                  data: {confirm: "Set #{config.queue_name} to #{target_mode} mode?"})
+              - if params[:queue_status].blank? || params[:queue_status] == "rest"
+                %tr{data: {queue_name: "Rest"}}
+                  %td
+                    %strong Rest
+                    %span.queueTable__description Unassigned, disabled, or unknown virtual queues
+                  %td
+                    %span.queueStatus.queueStatus--rest Rest
+                  %td
+                    %strong{data: {queue_value: "total"}}= number_with_delimiter(@rest_runtime[:total])
+                    %span.queueTable__secondary
+                      %span{data: {queue_value: "ready"}}= number_with_delimiter(@rest_runtime[:ready])
+                      ready ·
+                      %span{data: {queue_value: "scheduled"}}= number_with_delimiter(@rest_runtime[:scheduled])
+                      scheduled
+                  %td{data: {queue_value: "oldest"}}= @rest_runtime[:oldest_at] ? "#{time_ago_in_words(@rest_runtime[:oldest_at])} ago" : "-"
+                  %td
+                    %span.queueActivityNumbers.queueActivityNumbers--sent= "#{number_with_delimiter(@rest_activity[:sent])} sent"
+                    %span.queueActivityNumbers.queueActivityNumbers--soft= "#{number_with_delimiter(@rest_activity[:soft_fail])} soft"
+                    %span.queueActivityNumbers.queueActivityNumbers--hard= "#{number_with_delimiter(@rest_activity[:hard_fail])} hard"
+                  %td -
+                  %td{data: {queue_value: "next_attempt"}}= @rest_runtime[:next_attempt_at] ? @rest_runtime[:next_attempt_at].to_fs(:short) : "-"
+                  %td Rest is scheduled independently by domain or batch key.
+                  %td
+                    .buttonSet
+                      = link_to "Debug", admin_debug_rest_queue_path, class: "button button--small"
+                      = button_to "Retry", admin_retry_rest_queue_path(return_to: request.fullpath), method: :post, class: "button button--small button--dark", data: {confirm: "Make every unlocked delayed Rest message eligible for the next worker run?"}
+              - if @queue_rows.empty? && params[:queue_status].present? && params[:queue_status] != "rest"
+                %tr
+                  %td.dataTable__empty{colspan: 9} No queue matches these filters.
 
-  .u-margin#queue-configurations
-    %h2.pageContent__subTitle Queue configurations
-    - if @queue_configs.empty?
-      %p.pageContent__text No enabled queue configurations found.
-    - else
-      %table.dataTable.u-margin-half
-        %thead
-          %tr
-            %td Queue
-            %td Total
-            %td Ready
-            %td Scheduled
-            %td Locked
-            %td Next attempt
-            %td Mode
-            %td Max Msg Rate
-            %td SMTP Out
-            %td Max Rcpt
-            %td Backoff Relay
-            %td Backoff Delay
-            %td Last queue error
-            %td Auto Return
-            %td Action
-        %tbody
-          - @queue_configs.each do |config|
-            - runtime = @queue_runtime.fetch(config.queue_name)
-            - auto_return = "manual"
-            - if config.backoff_auto_success_threshold.present? && config.backoff_auto_success_window_seconds.present?
-              - auto_return = "#{config.backoff_auto_success_threshold} in #{distance_of_time_in_words(Time.current, Time.current + config.backoff_auto_success_window_seconds)}"
-            %tr
-              %td= config.queue_name
-              %td= number_with_delimiter(runtime[:total])
-              %td= number_with_delimiter(runtime[:ready])
-              %td= number_with_delimiter(runtime[:scheduled])
-              %td= number_with_delimiter(runtime[:locked])
-              - next_attempt = [runtime[:next_attempt_at], runtime[:queue_next_attempt_at]].compact.max
-              %td= next_attempt ? next_attempt.to_fs(:short) : "-"
-              %td= config.mode
-              %td= config.max_msg_rate || "-"
-              %td= "#{runtime[:active_smtp_out]}/#{runtime[:smtp_out_limit]}"
-              %td= config.max_rcpt_per_message || "-"
-              %td= config.backoff_reroute_to || "-"
-              %td
-                - if config.backoff_base_delay_seconds.present?
-                  = distance_of_time_in_words(Time.current, Time.current + config.backoff_base_delay_seconds)
-                - else
-                  = "-"
-              %td= runtime[:last_error].present? ? truncate(runtime[:last_error], length: 200) : "-"
-              %td= auto_return
-              %td
-                .buttonSet
-                  = link_to "Edit", admin_edit_queue_path(config), class: "button button--small"
-                  - target_mode = config.backoff? ? "normal" : "backoff"
-                  - label = config.backoff? ? "Set normal" : "Set backoff"
-                  = button_to label,
-                              admin_set_queue_mode_path(queue_name: config.queue_name, mode: target_mode),
-                              method: :post,
-                              class: ["button", "button--small", (config.backoff? ? "button--positive" : "button--danger")]
-                  = button_to "Retry now",
-                              admin_retry_queue_path(queue_name: config.queue_name),
-                              method: :post,
-                              class: "button button--small button--dark",
-                              data: { confirm: "Make every unlocked message in #{config.queue_name} eligible for the next worker run?" }
+      .queueDashboardGrid.u-margin
+        .queueDashboardGrid__main
+          %h2.pageContent__subTitle Delivery outcomes · last 24 hours
+          = render "activity_chart", series: @global_activity_series, chart_id: "global-queue-activity"
+        .queueDashboardGrid__side
+          %h2.pageContent__subTitle Top domains currently queued
+          - if @top_queue_domains.empty?
+            %p.pageContent__text No queued domains.
+          - else
+            %ol.queueRanking
+              - maximum_domain_count = @top_queue_domains.values.max.to_i
+              - @top_queue_domains.each do |domain, count|
+                %li.queueRanking__item
+                  .queueRanking__label
+                    %span= domain.presence || "(none)"
+                    %strong= number_with_delimiter(count)
+                  .queueRanking__bar
+                    %span{style: "width: #{maximum_domain_count.positive? ? ((count.to_f / maximum_domain_count) * 100).round : 0}%"}
 
-  .row.row--2col.u-margin
-    .col.col--10.col--collapse
+  - elsif @active_tab == "configurations"
+    %p.pageContent__intro.u-margin Queue limits, retry behavior, backoff routing, and automatic recovery.
+    .u-margin#queue-configurations
+      %h2.pageContent__subTitle Queue configurations
+      - if @queue_configs.empty?
+        %p.pageContent__text No enabled queue configurations found.
+      - else
+        .queueTableWrap
+          %table.dataTable
+            %thead
+              %tr
+                %td Queue
+                %td Mode
+                %td Rate
+                %td SMTP out
+                %td Max recipients
+                %td Backoff relay
+                %td Backoff delay
+                %td Auto return
+                %td Actions
+            %tbody
+              - @queue_configs.each do |config|
+                - runtime = @queue_runtime.fetch(config.queue_name)
+                - auto_return = config.backoff_auto_success_threshold.present? && config.backoff_auto_success_window_seconds.present? ? "#{config.backoff_auto_success_threshold} in #{distance_of_time_in_words(Time.current, Time.current + config.backoff_auto_success_window_seconds)}" : "manual"
+                %tr
+                  %td= link_to config.queue_name, admin_queue_path(config), class: "u-link"
+                  %td= config.mode
+                  %td= config.max_msg_rate || "-"
+                  %td= "#{runtime[:active_smtp_out]}/#{runtime[:smtp_out_limit]}"
+                  %td= config.max_rcpt_per_message || "-"
+                  %td= config.backoff_reroute_to || "-"
+                  %td= distance_of_time_in_words(Time.current, Time.current + config.backoff_base_delay_seconds)
+                  %td= auto_return
+                  %td= link_to "Edit", admin_edit_queue_path(config), class: "button button--small"
+    .u-margin.queueFormPanel
       %h2.pageContent__subTitle Add a queue
-      = render "queue_form",
-               queue_configuration: @new_queue,
-               form_url: admin_create_queue_path,
-               submit_label: "Add queue",
-               queue_name_editable: true
+      = render "queue_form", queue_configuration: @new_queue, form_url: admin_create_queue_path, submit_label: "Add queue", queue_name_editable: true
 
-    .col.col--10.col--collapse
+  - elsif @active_tab == "rollups"
+    %p.pageContent__intro.u-margin Map MX hostnames to enabled virtual queues.
+    .u-margin.queueFormPanel
       %h2.pageContent__subTitle Add an MX rollup
-      = render "rollup_form",
-               mx_rollup: @new_rollup,
-               queue_configs: @queue_configs,
-               form_url: admin_create_rollup_path,
-               submit_label: "Add MX rollup"
-
-  .u-margin#mx-rollups
-    %h2.pageContent__subTitle MX rollup mappings
-    - if @rollups.empty?
-      %p.pageContent__text No enabled MX rollups found.
-    - else
-      %table.dataTable.u-margin-half
-        %thead
-          %tr
-            %td MX hostname
-            %td Queue / rollup
-            %td Description
-            %td Action
-        %tbody
-          - @rollups.each do |rollup|
+      = render "rollup_form", mx_rollup: @new_rollup, queue_configs: @queue_configs, form_url: admin_create_rollup_path, submit_label: "Add MX rollup"
+    .u-margin#mx-rollups
+      %h2.pageContent__subTitle MX rollup mappings
+      - if @rollups.empty?
+        %p.pageContent__text No enabled MX rollups found.
+      - else
+        %table.dataTable
+          %thead
             %tr
-              %td= rollup.mx_hostname
-              %td= rollup.rollup_name
-              %td= rollup.description.presence || "-"
-              %td= link_to "Edit", admin_edit_rollup_path(rollup), class: "button button--small"
+              %td MX hostname
+              %td Queue / rollup
+              %td Description
+              %td Action
+          %tbody
+            - @rollups.each do |rollup|
+              %tr
+                %td= rollup.mx_hostname
+                %td
+                  - if queue_config = @queue_configs.find { |config| config.queue_name == rollup.rollup_name }
+                    = link_to rollup.rollup_name, admin_queue_path(queue_config), class: "u-link"
+                  - else
+                    = rollup.rollup_name
+                %td= rollup.description.presence || "-"
+                %td= link_to "Edit", admin_edit_rollup_path(rollup), class: "button button--small"
 
-  .u-margin
-    %h2.pageContent__subTitle Deliver a real diagnostic email
-    %p.pageContent__text.u-margin-half
-      Sends a real email, including DATA, from this Postal host using the selected queue's normal route or its backoff relay.
-      The complete SMTP response is displayed. A successful delivery returns a backoff queue to normal mode.
-    = form_with url: admin_smtp_probe_path, scope: :smtp_probe, local: true do |f|
-      %fieldset.fieldSet.fieldSet--compact.u-margin-half
-        .fieldSet__fieldPair
-          .fieldSet__field
-            = f.label :recipient, "Recipient to test", class: "fieldSet__label"
-            .fieldSet__input= f.email_field :recipient, value: @smtp_probe_values[:recipient], class: "input input--text", placeholder: "user@example.net", required: true
-          .fieldSet__field
-            = f.label :queue_name, "Queue", class: "fieldSet__label"
-            .fieldSet__input
-              = f.select :queue_name,
-                         options_for_select(@queue_configs.map { |queue| [queue.queue_name, queue.queue_name] }, @smtp_probe_values[:queue_name]),
-                         { include_blank: "Select a queue" },
-                         class: "input input--select",
-                         required: true
-        .fieldSet__field
-          = f.label :mail_from, "MAIL FROM", class: "fieldSet__label"
-          .fieldSet__input= f.email_field :mail_from, value: @smtp_probe_values[:mail_from], class: "input input--text", placeholder: "sender@example.com", required: true
-      = f.submit "Send diagnostic email", class: "button button--dark", data: { confirm: "This sends a real email to the recipient. Continue?" }
-
-    - if @smtp_probe_result
-      .u-margin
-        - probe_result_class = @smtp_probe_result.recipient_accepted ? "u-green u-bold" : (@smtp_probe_result.connected ? "u-orange u-bold" : "u-red u-bold")
-        %p{class: probe_result_class}= @smtp_probe_result.summary
-        - if @smtp_probe_result.endpoint
-          %p.pageContent__text= "Endpoint: #{@smtp_probe_result.endpoint}"
-        - if @smtp_probe_recovered_queue
-          %p.u-green.u-bold= "#{@smtp_probe_recovered_queue} returned to normal mode after the successful delivery."
-        %pre.codeBlock.codeBlock--whitespace= @smtp_probe_result.transcript
-
-  .u-margin
-    %h2.pageContent__subTitle Loaded global backoff rules
-    - if @backoff_rules.empty?
-      %p.pageContent__text No backoff rules loaded.
-    - else
-      %table.dataTable.u-margin-half
-        %thead
-          %tr
-            %td Action
-            %td Pattern
-            %td Source List
-        %tbody
-          - @backoff_rules.each do |rule|
+  - elsif @active_tab == "rules"
+    %p.pageContent__intro.u-margin SMTP response patterns that trigger backoff or bounce recipients.
+    .u-margin
+      %h2.pageContent__subTitle Loaded global backoff rules
+      - if @backoff_rules.empty?
+        %p.pageContent__text No backoff rules loaded.
+      - else
+        %table.dataTable
+          %thead
             %tr
-              %td= rule.action
-              %td= "/#{rule.pattern}/"
-              %td= rule.description.presence || "-"
+              %td Action
+              %td Pattern
+              %td Source list
+          %tbody
+            - @backoff_rules.each do |rule|
+              %tr
+                %td= rule.action
+                %td
+                  %code= "/#{rule.pattern}/"
+                %td= rule.description.presence || "-"
+
+  - elsif @active_tab == "diagnostics"
+    %p.pageContent__intro.u-margin Run a real delivery through a selected queue and inspect its ephemeral SMTP transcript.
+    = render "smtp_probe", queue_locked: false, return_queue_id: nil

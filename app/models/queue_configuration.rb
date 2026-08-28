@@ -70,13 +70,30 @@ class QueueConfiguration < ApplicationRecord
     mode.to_s == "backoff"
   end
 
-  def enter_backoff!
-    transaction do
+  def enter_backoff!(source: "manual", actor_id: nil, rule: nil, result: nil, queued_message: nil, details: nil)
+    transitioned = false
+    with_lock do
+      next if backoff?
+
+      now = Time.current
       update!(
         mode: "backoff",
-        backoff_started_at: Time.current,
+        backoff_started_at: now,
         backoff_last_success_at: nil,
         backoff_success_count: 0
+      )
+      SMTPQueueEvent.record_transition!(
+        queue_configuration: self,
+        event_type: "backoff_entered",
+        category: rule ? "smtp_rule" : "manual",
+        source: source,
+        severity: "warning",
+        actor_id: actor_id,
+        rule: rule,
+        result: result,
+        queued_message: queued_message,
+        details: details,
+        occurred_at: now
       )
 
       if backoff_reroute_to.present?
@@ -84,49 +101,57 @@ class QueueConfiguration < ApplicationRecord
                      .where("retry_after IS NOT NULL AND retry_after >= ?", 30.seconds.ago)
                      .update_all(retry_after: nil)
       end
+      transitioned = true
     end
+    transitioned
   end
 
-  def exit_backoff!
-    update!(
-      mode: "normal",
-      backoff_started_at: nil,
-      backoff_last_success_at: nil,
-      backoff_success_count: 0
-    )
-    SMTPQueueState.for_virtual_queue!(queue_name).retry_now!
+  def exit_backoff!(source: "manual", actor_id: nil, result: nil, queued_message: nil, details: nil)
+    transitioned = false
+    with_lock do
+      next unless backoff?
+
+      transition_to_normal_locked!(
+        source: source,
+        actor_id: actor_id,
+        result: result,
+        queued_message: queued_message,
+        details: details
+      )
+      transitioned = true
+    end
+    SMTPQueueState.for_virtual_queue!(queue_name).retry_now! if transitioned
+    transitioned
   end
 
   # Track successful sends while in backoff mode and auto-return when configured.
   #
   # @return [Boolean] true if queue has been switched back to normal
-  def register_backoff_success!
-    return false unless backoff?
+  def register_backoff_success!(result: nil, queued_message: nil)
+    returned_to_normal = false
+    with_lock do
+      next unless backoff?
 
-    now = Time.current
-    window = backoff_auto_success_window_seconds.to_i
-    threshold = backoff_auto_success_threshold.to_i
-    reset_count = window.positive? && backoff_last_success_at.present? && backoff_last_success_at < now - window.seconds
-    next_count = reset_count ? 1 : backoff_success_count.to_i + 1
+      now = Time.current
+      window = backoff_auto_success_window_seconds.to_i
+      threshold = backoff_auto_success_threshold.to_i
+      reset_count = window.positive? && backoff_last_success_at.present? && backoff_last_success_at < now - window.seconds
+      next_count = reset_count ? 1 : backoff_success_count.to_i + 1
 
-    attrs = {
-      backoff_success_count: next_count,
-      backoff_last_success_at: now
-    }
-
-    if threshold.positive? && next_count >= threshold
-      attrs.merge!(
-        mode: "normal",
-        backoff_started_at: nil,
-        backoff_last_success_at: nil,
-        backoff_success_count: 0
-      )
-      update!(attrs)
-      return true
+      if threshold.positive? && next_count >= threshold
+        transition_to_normal_locked!(
+          source: "auto_recovery",
+          result: result,
+          queued_message: queued_message,
+          details: "Automatic recovery after #{next_count} successful deliveries"
+        )
+        returned_to_normal = true
+      else
+        update!(backoff_success_count: next_count, backoff_last_success_at: now)
+      end
     end
-
-    update!(attrs)
-    false
+    SMTPQueueState.for_virtual_queue!(queue_name).retry_now! if returned_to_normal
+    returned_to_normal
   end
 
   def register_backoff_failure!
@@ -204,6 +229,28 @@ class QueueConfiguration < ApplicationRecord
   end
 
   private
+
+  def transition_to_normal_locked!(source:, actor_id: nil, result: nil, queued_message: nil, details: nil)
+    now = Time.current
+    update!(
+      mode: "normal",
+      backoff_started_at: nil,
+      backoff_last_success_at: nil,
+      backoff_success_count: 0
+    )
+    SMTPQueueEvent.record_transition!(
+      queue_configuration: self,
+      event_type: "backoff_exited",
+      category: source,
+      source: source,
+      severity: "info",
+      actor_id: actor_id,
+      result: result,
+      queued_message: queued_message,
+      details: details,
+      occurred_at: now
+    )
+  end
 
   def normalize_queue_name
     self.queue_name = queue_name.to_s.strip

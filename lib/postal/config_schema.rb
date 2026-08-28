@@ -105,6 +105,11 @@ module Postal
         default 1
       end
 
+      integer :queue_observability_retention_days do
+        description "The number of days to retain SMTP queue events and activity buckets"
+        default 30
+      end
+
       boolean :batch_queued_messages do
         description "When enabled queued messages will be de-queued in batches based on their destination"
         default true

@@ -255,6 +255,20 @@ INFO  Rate limit: 2000/h
 WARN  Rate limit reached for queue orange.queue (2000/h)
 ```
 
+The admin **Global Queues** cockpit also retains structured queue events and
+minute-level outcome counters. By default this history is kept for 30 days and
+can be changed with:
+
+```yaml
+postal:
+  queue_observability_retention_days: 30
+```
+
+Persisted event context includes the matched rule, sanitized SMTP response,
+recipient domain, source IP, remote endpoint, and delivery identifiers. Email
+local parts are masked. Full SMTP diagnostic transcripts are displayed only in
+the response that ran the diagnostic and are never stored.
+
 ## Migration from PowerMTA
 
 PowerMTA users can migrate their configurations:

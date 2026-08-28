@@ -1,0 +1,377 @@
+.queueCockpit__heading,
+.queueDetailActions,
+.queueSectionHeading {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:20px;
+}
+
+.queueCockpit__freshness {
+  color:$subBlue;
+  margin-top:5px;
+  font-size:12px;
+}
+
+.adminStats--queue {
+  gap:1px;
+  background:#ddd;
+  border:1px solid #ddd;
+  box-shadow:0 1px 4px rgba(0,0,0,0.12);
+}
+
+.adminStats--queue .adminStats__stat {
+  flex:1 1 0;
+  min-width:0;
+  background:#fff;
+  padding:16px 8px;
+}
+
+.navBar--secondary .navBar__link.is-active {
+  padding-bottom:8px;
+  border-bottom:3px solid $veryDarkBlue;
+}
+
+.adminStats--queue .adminStats__stat--warning {
+  background:#fff6ed;
+}
+
+.adminStats--queue .adminStats__stat--warning dd {
+  color:$orange;
+}
+
+.queueFilters {
+  display:flex;
+  align-items:flex-end;
+  flex-wrap:wrap;
+  gap:12px;
+  padding:15px;
+  border:1px solid #ddd;
+  background:#fff;
+}
+
+.queueFilters__field {
+  flex:1 1 180px;
+}
+
+.queueFilters__field .input {
+  width:100%;
+}
+
+.queueFilters__actions {
+  display:flex;
+  gap:8px;
+  padding-bottom:1px;
+}
+
+.queueFilters--events .queueFilters__field { flex-basis:190px; }
+
+.queueFilters--events .queueFilters__field:nth-last-of-type(1) { flex-basis:280px; }
+
+.queueTableWrap {
+  max-width:100%;
+  overflow-x:auto;
+  padding:3px;
+  margin:-3px;
+}
+
+.queueTable {
+  min-width:1180px;
+}
+
+.queueTable__description,
+.queueTable__secondary {
+  display:block;
+  margin-top:3px;
+  color:$subBlue;
+  font-size:12px;
+  line-height:1.25;
+}
+
+.queueTable__attentionRow td {
+  background:#fff8f2 !important;
+}
+
+.queueStatus {
+  display:inline-block;
+  padding:3px 7px;
+  border-radius:3px;
+  font-size:11px;
+  line-height:1;
+  text-transform:uppercase;
+  letter-spacing:0.04em;
+  font-weight:600;
+  color:$darkBlue;
+  background:#e7e9eb;
+}
+
+.queueStatus--normal {
+  color:darken($green, 22%);
+  background:lighten($green, 37%);
+}
+
+.queueStatus--deferred {
+  color:darken($orange, 15%);
+  background:lighten($orange, 39%);
+}
+
+.queueStatus--backoff {
+  color:darken($red, 10%);
+  background:lighten($red, 39%);
+}
+
+.queueStatus--rest {
+  color:$subBlue;
+  background:#eceff2;
+}
+
+.queueActivityNumbers {
+  display:block;
+  font-size:12px;
+}
+
+.queueActivityNumbers--sent { color:darken($green, 18%); }
+.queueActivityNumbers--soft { color:$orange; }
+.queueActivityNumbers--hard { color:$red; }
+
+.queueDashboardGrid {
+  display:grid;
+  grid-template-columns:minmax(0, 2fr) minmax(300px, 1fr);
+  gap:25px;
+}
+
+.queueActivity {
+  min-height:250px;
+}
+
+.queueActivity__graph {
+  min-height:225px;
+  margin-bottom:8px;
+
+  .ct-series-a .ct-line { stroke:$green; }
+  .ct-series-b .ct-line { stroke:$orange; }
+  .ct-series-c .ct-line { stroke:$red; }
+  .ct-series-a .ct-area { fill:$green; }
+  .ct-series-b .ct-area { fill:$orange; }
+  .ct-series-c .ct-area { fill:$red; }
+  .ct-line { stroke-width:2px; }
+  .ct-point { stroke-width:0; }
+  .ct-area { fill-opacity:0.08; }
+}
+
+.queueActivity__empty {
+  min-height:220px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:1px dashed #ccc;
+  color:$subBlue;
+}
+
+.queueActivity__legend {
+  display:flex;
+  justify-content:flex-end;
+  gap:15px;
+  font-size:12px;
+}
+
+.queueActivity__legendItem:before {
+  content:"";
+  display:inline-block;
+  width:10px;
+  height:3px;
+  margin-right:5px;
+  vertical-align:3px;
+  background:$subBlue;
+}
+
+.queueActivity__legendItem--sent:before { background:$green; }
+.queueActivity__legendItem--soft:before { background:$orange; }
+.queueActivity__legendItem--hard:before { background:$red; }
+
+.queueActivity__accessible {
+  margin-top:12px;
+  color:$subBlue;
+}
+
+.queueActivity__accessible summary,
+.queueEventDetails summary {
+  cursor:pointer;
+  text-decoration:underline;
+}
+
+.queueActivityTotals {
+  display:flex;
+  flex-wrap:wrap;
+  margin-top:15px;
+  border-top:1px solid #ddd;
+  border-bottom:1px solid #ddd;
+}
+
+.queueActivityTotals__item {
+  flex:1 1 120px;
+  padding:10px;
+  text-align:center;
+}
+
+.queueActivityTotals__item dt {
+  color:$subBlue;
+  font-size:12px;
+}
+
+.queueActivityTotals__item dd {
+  font-size:18px;
+  font-weight:600;
+}
+
+.queueRanking__item {
+  margin-bottom:13px;
+}
+
+.queueRanking__label {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.queueRanking__bar {
+  display:block;
+  height:5px;
+  margin-top:4px;
+  background:#e8ebef;
+}
+
+.queueRanking__bar span {
+  display:block;
+  height:100%;
+  background:$blue;
+}
+
+.queueDetailHeader {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+}
+
+.queueDetailHeader .pageHeader__titlePrevious a {
+  color:#fff;
+}
+
+.queueDetailHeader .pageHeader__titlePrevious {
+  opacity:0.6;
+}
+
+.queueDetailActions {
+  align-items:center;
+}
+
+.queueDetailActions__summary {
+  color:$subBlue;
+  font-size:16px;
+}
+
+.queueIncident {
+  padding:18px 20px;
+  border-left:5px solid $orange;
+  background:#fff8ef;
+  box-shadow:0 1px 3px rgba(0,0,0,0.1);
+}
+
+.queueIncident__title {
+  font-size:18px;
+  font-weight:600;
+  color:darken($orange, 15%);
+  margin-bottom:8px;
+}
+
+.queueIncident__response {
+  font-family:'Droid Sans Mono', fixed;
+  line-height:1.45;
+  word-break:break-word;
+}
+
+.queueIncident__facts {
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:12px 20px;
+  margin-top:15px;
+}
+
+.queueIncident__fact dt {
+  color:$subBlue;
+  font-size:12px;
+}
+
+.queueIncident__fact dd {
+  overflow-wrap:anywhere;
+}
+
+.queueRangePicker {
+  white-space:nowrap;
+}
+
+.queueEvents {
+  min-width:1000px;
+}
+
+.queueEventDetails[open] {
+  min-width:430px;
+}
+
+.queueEventDetails .pageContent__definitions {
+  margin-top:12px;
+  white-space:normal;
+}
+
+.queueFormPanel,
+.queueConfigurationSummary,
+.queueDiagnostic {
+  max-width:900px;
+}
+
+.queueDiagnostic__result {
+  max-width:100%;
+}
+
+.dataTable--compact {
+  box-shadow:none;
+  font-size:12px;
+}
+
+.text-nowrap {
+  white-space:nowrap;
+}
+
+@media (max-width: 900px) {
+  .queueDashboardGrid {
+    grid-template-columns:1fr;
+  }
+
+  .adminStats--queue {
+    flex-wrap:wrap;
+  }
+
+  .adminStats--queue .adminStats__stat {
+    flex:1 1 30%;
+  }
+
+  .queueIncident__facts {
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+  }
+
+  .queueCockpit__heading,
+  .queueDetailActions,
+  .queueSectionHeading {
+    flex-direction:column;
+  }
+}
+
+@media (max-width: 600px) {
+  .adminStats--queue .adminStats__stat {
+    flex-basis:45%;
+  }
+
+  .queueIncident__facts {
+    grid-template-columns:1fr;
+  }
+}

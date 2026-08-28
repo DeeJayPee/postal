@@ -222,11 +222,26 @@ class SMTPSender < BaseSender
     result.type = type
     result.log_id = @log_id
     result.secure = @current_endpoint&.smtp_client&.secure_socket? ? true : false
+    result.source_ip = current_source_ip
+    result.remote_endpoint = @current_endpoint&.description
+    result.attempted_endpoints = @endpoints.map(&:description).join(", ").presence
     yield result if block_given?
     if start_time
       result.time = (Time.now - start_time).to_f.round(2)
     end
     result
+  end
+
+  def current_source_ip
+    actual_source = @current_endpoint&.smtp_client&.source_address
+    return actual_source if actual_source.present?
+    return unless @source_ip_address
+
+    if @current_endpoint&.ipv6?
+      @source_ip_address.ipv6.presence || @source_ip_address.ipv4
+    else
+      @source_ip_address.ipv4.presence || @source_ip_address.ipv6
+    end
   end
 
   def logger

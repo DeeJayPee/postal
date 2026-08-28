@@ -3,7 +3,6 @@
 require "rails_helper"
 
 RSpec.describe SMTPConnectionProbe do
-
   describe "#call" do
     let(:resolver) { instance_double(DNSResolver) }
     let(:server) { instance_double(SMTPClient::Server, hostname: "mx.example.net") }
@@ -26,7 +25,9 @@ RSpec.describe SMTPConnectionProbe do
       end
       allow(endpoint).to receive(:reset_smtp_session)
       allow(endpoint).to receive(:finish_smtp_session)
-      allow(smtp).to receive(:send_message).and_return(response)
+      allow(smtp).to receive(:mailfrom).and_return(response)
+      allow(smtp).to receive(:rcptto).and_return(response)
+      allow(smtp).to receive(:data).and_return(response)
     end
 
     it "sends a real diagnostic message and captures the SMTP response" do
@@ -40,11 +41,9 @@ RSpec.describe SMTPConnectionProbe do
       expect(result.recipient_accepted).to be(true)
       expect(result.resolved_queue).to eq("example.queue")
       expect(result.transcript).to include("220 mx.example.net ESMTP")
-      expect(smtp).to have_received(:send_message).with(
-        include("Postal queue diagnostic for example.queue"),
-        "sender@example.org",
-        ["user@example.net"]
-      )
+      expect(smtp).to have_received(:mailfrom).with("sender@example.org")
+      expect(smtp).to have_received(:rcptto).with("user@example.net")
+      expect(smtp).to have_received(:data).with(include("Postal queue diagnostic for example.queue"))
       expect(endpoint).to have_received(:reset_smtp_session)
     end
 
@@ -61,7 +60,7 @@ RSpec.describe SMTPConnectionProbe do
     end
 
     it "returns the remote SMTP rejection and still reports a successful connection" do
-      allow(smtp).to receive(:send_message).and_raise(Net::SMTPFatalError, "550 5.1.1 User unknown")
+      allow(smtp).to receive(:rcptto).and_raise(Net::SMTPFatalError, "550 5.1.1 User unknown")
 
       result = described_class.new(
         recipient: "user@example.net",
@@ -74,6 +73,20 @@ RSpec.describe SMTPConnectionProbe do
       expect(result.summary).to include("550 5.1.1 User unknown")
       expect(result.transcript).to include("Net::SMTPFatalError")
     end
-  end
 
+    it "reports RCPT acceptance even if the server rejects DATA afterward" do
+      allow(smtp).to receive(:data).and_raise(Net::SMTPFatalError, "554 5.7.1 Content rejected")
+
+      result = described_class.new(
+        recipient: "user@example.net",
+        queue_name: "example.queue",
+        mail_from: "sender@example.org"
+      ).call
+
+      expect(result.connected).to be(true)
+      expect(result.recipient_accepted).to be(true)
+      expect(result.summary).to include("accepted RCPT TO", "554 5.7.1 Content rejected")
+      expect(result.transcript).to include("Net::SMTPFatalError")
+    end
+  end
 end

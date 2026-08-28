@@ -34,6 +34,23 @@ RSpec.describe QueueConfiguration do
       expect(scheduled.reload.retry_after).to be_nil
       expect(locked.reload.retry_after).to be_present
     end
+
+    it "records exactly one transition when two stale instances enter backoff" do
+      first_worker = described_class.find(queue.id)
+      second_worker = described_class.find(queue.id)
+
+      expect(first_worker.enter_backoff!(source: "smtp_rule")).to eq(true)
+      expect(second_worker.enter_backoff!(source: "smtp_rule")).to eq(false)
+
+      expect(SMTPQueueEvent.where(queue_name: queue.queue_name, event_type: "backoff_entered").count).to eq(1)
+    end
+
+    it "rolls the state change back when its transition event cannot be persisted" do
+      allow(SMTPQueueEvent).to receive(:record_transition!).and_raise(ActiveRecord::RecordInvalid)
+
+      expect { queue.enter_backoff! }.to raise_error(ActiveRecord::RecordInvalid)
+      expect(queue.reload).to be_normal
+    end
   end
 
   describe "#register_backoff_success!" do
@@ -51,6 +68,22 @@ RSpec.describe QueueConfiguration do
 
       expect(queue.register_backoff_success!).to eq(true)
       expect(queue.reload.mode).to eq("normal")
+      expect(SMTPQueueEvent.where(queue_name: queue.queue_name, event_type: "backoff_exited").last.source).to eq("auto_recovery")
+    end
+  end
+
+  describe "#exit_backoff!" do
+    it "uses the common transition and resets scheduler state" do
+      queue.enter_backoff!
+      state = SMTPQueueState.for_virtual_queue!(queue.queue_name)
+      state.update!(next_attempt_at: 1.hour.from_now, consecutive_failures: 2)
+
+      expect(queue.exit_backoff!(source: "smtp_probe", details: "Probe accepted")).to eq(true)
+
+      expect(queue.reload).to be_normal
+      expect(state.reload).to have_attributes(next_attempt_at: nil, consecutive_failures: 0)
+      event = SMTPQueueEvent.where(queue_name: queue.queue_name, event_type: "backoff_exited").last
+      expect(event).to have_attributes(source: "smtp_probe", details: "Probe accepted")
     end
   end
 

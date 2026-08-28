@@ -4,7 +4,7 @@ require "rails_helper"
 
 RSpec.describe AdminQueuesController, type: :controller do
 
-  let(:admin) { instance_double(User, admin?: true, time_zone: "UTC") }
+  let(:admin) { instance_double(User, id: 1, admin?: true, time_zone: "UTC") }
 
   before do
     allow(controller).to receive(:logged_in?).and_return(true)
@@ -101,7 +101,7 @@ RSpec.describe AdminQueuesController, type: :controller do
         }
       }
 
-      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response).to have_http_status(:unprocessable_content)
       expect(queue.reload.backoff_reroute_to).to be_nil
       expect(queue.max_msg_rate).to be_nil
     end
@@ -141,7 +141,7 @@ RSpec.describe AdminQueuesController, type: :controller do
         }
       }
 
-      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response).to have_http_status(:unprocessable_content)
       expect(rollup.reload).to have_attributes(
         mx_hostname: "mx.example.net",
         rollup_name: "example.queue"
@@ -159,10 +159,14 @@ RSpec.describe AdminQueuesController, type: :controller do
 
       post :retry_queue, params: { queue_name: queue.queue_name }
 
-      expect(response).to redirect_to(admin_queues_path(anchor: "queue-configurations"))
+      expect(response).to redirect_to(admin_queues_path(tab: "overview"))
       expect(scheduled.reload.retry_after).to be_nil
       expect(locked.reload.retry_after).to be_present
       expect(state.reload.next_attempt_at).to be_nil
+      expect(SMTPQueueEvent.where(queue_name: queue.queue_name, event_type: "retry_requested").last).to have_attributes(
+        source: "manual",
+        actor_id: admin.id
+      )
     end
   end
 
@@ -252,6 +256,81 @@ RSpec.describe AdminQueuesController, type: :controller do
 
       expect(response).to have_http_status(:ok)
       expect(queue.reload).to be_normal
+      expect(SMTPQueueEvent.where(queue_name: queue.queue_name).pluck(:event_type)).to contain_exactly(
+        "diagnostic_succeeded",
+        "backoff_exited"
+      )
+      expect(SMTPQueueEvent.where(queue_name: queue.queue_name).pluck(:smtp_response, :details).flatten.compact.join("\n")).not_to include("250 OK")
+      expect(SMTPQueueEvent.where(queue_name: queue.queue_name).pluck(:actor_id).uniq).to eq([admin.id])
+    end
+
+    it "records a failed diagnostic without leaving backoff" do
+      queue = QueueConfiguration.create!(queue_name: "example.queue", mode: "backoff")
+      result = SMTPConnectionProbe::Result.new(
+        connected: true,
+        recipient_accepted: false,
+        summary: "SMTP rejected user@example.net",
+        transcript: "550 rejected user@example.net",
+        recipient_domain: "example.net",
+        endpoint: "mx.example.net (192.0.2.20)"
+      )
+      allow(SMTPConnectionProbe).to receive(:new).and_return(instance_double(SMTPConnectionProbe, call: result))
+
+      post :smtp_probe, params: {
+        smtp_probe: {
+          queue_name: queue.queue_name,
+          recipient: "user@example.net",
+          mail_from: "sender@example.org"
+        }
+      }
+
+      expect(queue.reload).to be_backoff
+      event = SMTPQueueEvent.where(queue_name: queue.queue_name).sole
+      expect(event).to have_attributes(event_type: "diagnostic_failed", source: "smtp_probe")
+      expect(event.details).to eq("SMTP rejected ***@example.net")
+      expect(event.details).not_to include("550 rejected")
+    end
+  end
+
+  describe "queue observability pages" do
+    render_views
+
+    let!(:queue) { QueueConfiguration.create!(queue_name: "example.queue", mode: "normal") }
+
+    around do |example|
+      described_class.layout false
+      example.run
+    ensure
+      described_class.layout nil
+    end
+
+    it "renders the global cockpit and the queue detail for an empty queue" do
+      get :index, params: { tab: "overview" }
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include("Queue status", "Top domains currently queued")
+
+      get :show_queue, params: { id: queue.id }
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include("example.queue", "This queue is empty", "Deliver a real diagnostic email")
+    end
+
+    it "returns read-only runtime and activity JSON" do
+      SMTPQueueActivityBucket.record_result!(
+        queue_name: queue.queue_name,
+        result: SendResult.new { |result| result.type = "Sent" }
+      )
+
+      get :runtime, params: { format: :json }
+      expect(response).to have_http_status(:ok)
+      runtime = response.parsed_body
+      expect(runtime.dig("stats", "backoff")).to eq(0)
+      expect(runtime.fetch("queues").first).to include("name" => "example.queue", "status" => "normal")
+
+      get :queue_activity, params: { id: queue.id, range: "15m", format: :json }
+      expect(response).to have_http_status(:ok)
+      activity = response.parsed_body
+      expect(activity).to include("queue" => "example.queue", "range" => "15m")
+      expect(activity.fetch("series").sum { |bucket| bucket.fetch("sent") }).to eq(1)
     end
   end
 
@@ -283,7 +362,7 @@ RSpec.describe AdminQueuesController, type: :controller do
   describe "admin access" do
     it "does not allow a non-admin to open a queue editor" do
       queue = QueueConfiguration.create!(queue_name: "example.queue")
-      non_admin = instance_double(User, admin?: false, time_zone: "UTC")
+      non_admin = instance_double(User, id: 2, admin?: false, time_zone: "UTC")
       allow(controller).to receive(:current_user).and_return(non_admin)
 
       get :edit_queue, params: { id: queue.id }

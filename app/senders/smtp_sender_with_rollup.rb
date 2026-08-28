@@ -136,6 +136,7 @@ class SMTPSenderWithRollup < SMTPSender
       return create_result("SoftFail") do |r|
         r.retry = retry_after
         r.queue_retry_after = retry_after
+        r.rate_limited = true
         r.details = "Rate limit exceeded for queue #{@virtual_queue_name}; keeping message queued"
         r.output = "Rate limit exceeded (#{@queue_config&.max_msg_rate})"
       end
@@ -146,5 +147,11 @@ class SMTPSenderWithRollup < SMTPSender
     end
 
     super(raw_message, mail_from, rcpt_to, retry_on_connection_error: retry_on_connection_error)
+  end
+
+  def create_result(type, start_time = nil, &block)
+    super.tap do |result|
+      result.resolved_queue = @virtual_queue_name
+    end
   end
 end

@@ -338,8 +338,19 @@ RSpec.describe SMTPSender do
           expect(result).to have_attributes(
             type: "Sent",
             details: "Message for john@example.com accepted by 1.2.3.4:25 (mx1.example.com)",
-            output: "accepted"
+            output: "accepted",
+            remote_endpoint: "1.2.3.4:25 (mx1.example.com)",
+            attempted_endpoints: "1.2.3.4:25 (mx1.example.com)"
           )
+        end
+
+        context "when a source IP is selected" do
+          let(:source_ip_address) { create(:ip_address, ipv4: "192.0.2.10") }
+          subject(:sender) { described_class.new("example.com", source_ip_address, servers: [smtp_client_server]) }
+
+          it "includes the source IP actually selected for the endpoint" do
+            expect(sender.send_message(message).source_ip).to eq("192.0.2.10")
+          end
         end
       end
 

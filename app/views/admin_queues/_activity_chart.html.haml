@@ -1,0 +1,26 @@
+- chart_id ||= "queue-activity"
+.queueActivity.js-queue-activity{id: chart_id, data: {series: series.to_json}}
+  - if series.empty?
+    .queueActivity__empty No activity recorded for this period.
+  - else
+    .queueActivity__graph{role: "img", aria: {label: "Delivery outcomes over time: sent, soft fail, and hard fail"}}
+    %ul.queueActivity__legend{aria: {hidden: "true"}}
+      %li.queueActivity__legendItem.queueActivity__legendItem--sent Sent
+      %li.queueActivity__legendItem.queueActivity__legendItem--soft Soft fail
+      %li.queueActivity__legendItem.queueActivity__legendItem--hard Hard fail
+    %details.queueActivity__accessible
+      %summary View activity as a table
+      %table.dataTable.dataTable--compact
+        %thead
+          %tr
+            %td Time
+            %td Sent
+            %td Soft fail
+            %td Hard fail
+        %tbody
+          - series.each do |bucket|
+            %tr
+              %td= Time.zone.parse(bucket[:time]).to_fs(:short)
+              %td= bucket[:sent]
+              %td= bucket[:soft_fail]
+              %td= bucket[:hard_fail]

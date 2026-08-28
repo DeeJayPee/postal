@@ -28,6 +28,40 @@
 require "rails_helper"
 
 RSpec.describe QueuedMessage do
+  describe ".observability_snapshot" do
+    it "classifies configured and Rest queues in one consistent snapshot" do
+      queue_name = "snapshot-#{SecureRandom.hex(6)}.queue"
+      baseline = described_class.observability_snapshot([queue_name])
+      create(:queued_message, virtual_queue: queue_name, created_at: 2.hours.ago)
+      create(:queued_message, virtual_queue: queue_name, retry_after: 1.hour.from_now)
+      create(:queued_message, :locked, virtual_queue: queue_name)
+      create(:queued_message, virtual_queue: nil)
+      create(:queued_message, virtual_queue: "disabled.queue")
+
+      snapshot = described_class.observability_snapshot([queue_name])
+
+      expect(snapshot).to include(
+        total: baseline[:total] + 5,
+        known: baseline[:known] + 3,
+        rest_count: baseline[:rest_count] + 2
+      )
+      expect(snapshot[:global]).to include(
+        total: baseline.dig(:global, :total) + 5,
+        ready: baseline.dig(:global, :ready) + 3,
+        scheduled: baseline.dig(:global, :scheduled) + 1,
+        locked: baseline.dig(:global, :locked) + 1
+      )
+      expect(snapshot[:queues].fetch(queue_name)).to include(total: 3, ready: 1, scheduled: 1, locked: 1)
+      expect(snapshot[:rest]).to include(
+        total: baseline.dig(:rest, :total) + 2,
+        ready: baseline.dig(:rest, :ready) + 2,
+        scheduled: baseline.dig(:rest, :scheduled),
+        locked: baseline.dig(:rest, :locked)
+      )
+      expect(snapshot[:queues].fetch(queue_name)[:oldest_at]).to be_within(1.second).of(2.hours.ago)
+    end
+  end
+
   subject(:queued_message) { build(:queued_message) }
 
   describe "relationships" do
@@ -79,17 +113,33 @@ RSpec.describe QueuedMessage do
 
   describe ".runtime_summary" do
     it "separates worker-ready, scheduled, and locked messages" do
-      create(:queued_message, retry_after: nil)
+      ready = create(:queued_message, retry_after: nil)
       scheduled = create(:queued_message, retry_after: 1.hour.from_now)
-      create(:queued_message, :locked, retry_after: nil)
+      locked = create(:queued_message, :locked, retry_after: nil)
+      scope = described_class.where(id: [ready.id, scheduled.id, locked.id])
+      summary = described_class.runtime_summary(scope)
 
-      expect(described_class.runtime_summary).to include(
+      expect(summary).to include(
         total: 3,
         ready: 1,
         scheduled: 1,
         locked: 1
       )
-      expect(described_class.runtime_summary[:next_attempt_at]).to be_within(1.second).of(scheduled.retry_after)
+      expect(summary[:next_attempt_at]).to be_within(1.second).of(scheduled.retry_after)
+    end
+  end
+
+  describe ".domain_observability" do
+    it "returns one grouped summary for the requested scope" do
+      ready = create(:queued_message, domain: "example.net", retry_after: nil, created_at: 2.hours.ago)
+      scheduled = create(:queued_message, domain: "example.net", retry_after: 1.hour.from_now)
+      other = create(:queued_message, domain: "other.example")
+      scope = described_class.where(id: [ready.id, scheduled.id, other.id])
+
+      expect(described_class.domain_observability(scope)).to contain_exactly(
+        include(domain: "example.net", total: 2, ready: 1, scheduled: 1, oldest_at: be_within(1.second).of(2.hours.ago)),
+        include(domain: "other.example", total: 1, ready: 1, scheduled: 0)
+      )
     end
   end
 
