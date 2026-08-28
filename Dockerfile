@@ -48,8 +48,17 @@ COPY --chown=postal . .
 # Export the version
 ARG VERSION
 ARG BRANCH
-RUN if [ "$VERSION" != "" ]; then echo $VERSION > VERSION; fi \
-  && if [ "$BRANCH" != "" ]; then echo $BRANCH > BRANCH; fi
+RUN resolved_version="$VERSION" \
+  && branch_slug="$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^0-9a-z.-]+/-/g; s/^-+|-+$//g')" \
+  && if [ -z "$resolved_version" ]; then \
+    base_version="$(ruby -rjson -e 'print JSON.parse(File.read(".release-please-manifest.json")).fetch(".")')"; \
+    resolved_version="$base_version"; \
+    if [ -n "$branch_slug" ] && [ "$branch_slug" != "main" ]; then \
+      resolved_version="${base_version}-mod-${branch_slug}"; \
+    fi; \
+  fi \
+  && printf '%s\n' "$resolved_version" > VERSION \
+  && if [ -n "$BRANCH" ]; then printf '%s\n' "$BRANCH" > BRANCH; fi
 
 # Set paths for when running in a container
 ENV POSTAL_CONFIG_FILE_PATH=/config/postal.yml
