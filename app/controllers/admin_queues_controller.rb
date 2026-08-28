@@ -106,6 +106,73 @@ class AdminQueuesController < ApplicationController
                 notice: "#{scheduled_count} message(s) in #{queue_config.queue_name} are eligible for the next worker run."
   end
 
+  def retry_rest
+    unlocked_messages = rest_queue_scope.where(locked_at: nil)
+
+    scheduled_messages = unlocked_messages.where("retry_after IS NOT NULL AND retry_after >= ?", 30.seconds.ago)
+    scheduled_count = scheduled_messages.update_all(retry_after: nil, updated_at: Time.current)
+    state_count = 0
+    unlocked_messages.select(:id, :virtual_queue, :domain, :batch_key).find_in_batches(batch_size: 1_000) do |messages|
+      queue_keys = messages.map { |message| SMTPQueueState.queue_key_for(message) }.uniq
+      blocked_states = SMTPQueueState.where(queue_key: queue_keys)
+                                     .where("next_attempt_at IS NOT NULL OR consecutive_failures <> 0 OR last_error IS NOT NULL")
+      state_count += blocked_states.update_all(
+        next_attempt_at: nil,
+        consecutive_failures: 0,
+        last_error: nil,
+        updated_at: Time.current
+      )
+    end
+
+    redirect_to admin_queues_path(anchor: "rest-queue"),
+                notice: "#{scheduled_count} delayed Rest message(s) and #{state_count} scheduler state(s) are eligible for the next worker run."
+  end
+
+  def debug_rest
+    scope = rest_queue_scope
+    @rest_runtime = QueuedMessage.runtime_summary(scope)
+    @rest_unassigned_count = scope.where(virtual_queue: [nil, ""]).count
+    @rest_unknown_queues = scope.where.not(virtual_queue: [nil, ""])
+                                .group(:virtual_queue)
+                                .order(Arel.sql("COUNT(*) DESC"))
+                                .count
+
+    domain_totals = scope.group(:domain).order(Arel.sql("COUNT(*) DESC")).limit(100).count
+    domains = domain_totals.keys
+    domain_scope = scope.where(domain: domains)
+    domain_locked = domain_scope.where.not(locked_at: nil).group(:domain).count
+    domain_ready = domain_scope.where(locked_at: nil).ready_with_delayed_retry.group(:domain).count
+    domain_scheduled_scope = domain_scope.where(locked_at: nil)
+                                         .where("retry_after IS NOT NULL AND retry_after >= ?", 30.seconds.ago)
+    domain_scheduled = domain_scheduled_scope.group(:domain).count
+    domain_next_attempt = domain_scheduled_scope.group(:domain).minimum(:retry_after)
+    @rest_domains = domain_totals.map do |domain, total|
+      {
+        domain: domain,
+        total: total,
+        ready: domain_ready[domain].to_i,
+        scheduled: domain_scheduled[domain].to_i,
+        locked: domain_locked[domain].to_i,
+        next_attempt_at: domain_next_attempt[domain]
+      }
+    end
+
+    @rest_messages = scope.includes(server: :organization).order(:created_at, :id).page(params[:page]).per(100)
+    queue_keys = @rest_messages.map { |message| SMTPQueueState.queue_key_for(message) }
+    states = SMTPQueueState.where(queue_key: queue_keys).index_by(&:queue_key)
+    @rest_message_diagnostics = @rest_messages.index_with do |message|
+      queue_key = SMTPQueueState.queue_key_for(message)
+      {
+        queue_key: queue_key,
+        reason: rest_reason(message),
+        state: states[queue_key]
+      }
+    end
+
+    debug_domain = params[:domain].to_s.strip.downcase.delete_suffix(".")
+    @rest_domain_debug = debug_rest_domain(debug_domain) if debug_domain.present? && scope.where(domain: debug_domain).exists?
+  end
+
   def refresh_queue_assignments
     enabled_queue_names = QueueConfiguration.enabled.pluck(:queue_name)
     refresh_result = VirtualQueueReclassifier.new(
@@ -146,17 +213,12 @@ class AdminQueuesController < ApplicationController
     @rollups = MXRollup.enabled.order(:rollup_name, :mx_hostname).to_a
     @backoff_rules = BackoffRule.enabled.order(:action, :pattern).to_a
 
-    known_queue_names = @queue_configs.map(&:queue_name)
-    known_queue_names.concat(@rollups.map(&:rollup_name))
-    known_queue_names.concat(DomainMacro.enabled.where.not(queue_name: [nil, ""]).distinct.pluck(:queue_name))
-    known_queue_names.uniq!
-
     queue_summary = QueuedMessage.global_queue_summary(known_queue_names)
     @global_queue_size = queue_summary[:total]
     @known_queue_size = queue_summary[:known]
     @rest_queue_size = queue_summary[:rest]
     @global_runtime = QueuedMessage.runtime_summary
-    @rest_runtime = QueuedMessage.runtime_summary(QueuedMessage.outside_virtual_queues(known_queue_names))
+    @rest_runtime = QueuedMessage.runtime_summary(rest_queue_scope)
     @queue_runtime = QueuedMessage.runtime_by_virtual_queue(@queue_configs.map(&:queue_name))
     queue_states = SMTPQueueState.where(
       queue_key: @queue_configs.map { |config| "virtual:#{config.queue_name}" }
@@ -232,6 +294,53 @@ class AdminQueuesController < ApplicationController
 
     rollup.errors.add(:rollup_name, "must reference an enabled queue")
     false
+  end
+
+  def known_queue_names
+    @known_queue_names ||= begin
+      names = QueueConfiguration.enabled.pluck(:queue_name)
+      names.concat(MXRollup.enabled.distinct.pluck(:rollup_name))
+      names.concat(DomainMacro.enabled.where.not(queue_name: [nil, ""]).distinct.pluck(:queue_name))
+      names.uniq
+    end
+  end
+
+  def rest_queue_scope
+    QueuedMessage.outside_virtual_queues(known_queue_names)
+  end
+
+  def rest_reason(message)
+    if message.virtual_queue.blank?
+      "No virtual queue assigned; the scheduler uses the recipient domain or batch key."
+    else
+      "Stored virtual queue #{message.virtual_queue.inspect} is not present in any enabled queue, MX rollup, or domain macro."
+    end
+  end
+
+  def debug_rest_domain(domain)
+    macro_queue = DomainMacro.find_queue_for_domain(domain)
+    mx_records = DNSResolver.local.mx(domain, raise_timeout_errors: false)
+    mx_matches = mx_records.map do |priority, hostname|
+      {
+        priority: priority,
+        hostname: hostname,
+        queue_name: MXRollup.find_rollup_for_mx(hostname)
+      }
+    end
+    resolved_queue = macro_queue.presence || mx_matches.filter_map { |record| record[:queue_name] }.first
+
+    {
+      domain: domain,
+      macro_queue: macro_queue,
+      mx_matches: mx_matches,
+      resolved_queue: resolved_queue,
+      queue_enabled: resolved_queue.present? && QueueConfiguration.find_for_queue(resolved_queue).present?
+    }
+  rescue StandardError => e
+    {
+      domain: domain,
+      error: "#{e.class}: #{e.message}"
+    }
   end
 
   def default_probe_mail_from

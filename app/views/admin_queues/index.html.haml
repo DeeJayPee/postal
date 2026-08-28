@@ -42,12 +42,38 @@
     = succeed " locked." do
       %strong= number_with_delimiter(@rest_runtime[:locked])
 
-  .buttonSet.u-margin
-    = button_to "Refresh pending queue assignments",
-                admin_refresh_queue_assignments_path(after_id: @reclassify_after),
-                method: :post,
-                class: "button button--small button--dark",
-                data: { confirm: "Resolve current recipient MX records and reclassify up to 1,000 pending messages?" }
+  .u-margin#rest-queue
+    %table.dataTable.u-margin-half
+      %thead
+        %tr
+          %td Queue
+          %td Total
+          %td Ready
+          %td Scheduled
+          %td Locked
+          %td Next attempt
+          %td Action
+      %tbody
+        %tr
+          %td Rest
+          %td= number_with_delimiter(@rest_runtime[:total])
+          %td= number_with_delimiter(@rest_runtime[:ready])
+          %td= number_with_delimiter(@rest_runtime[:scheduled])
+          %td= number_with_delimiter(@rest_runtime[:locked])
+          %td= @rest_runtime[:next_attempt_at] ? @rest_runtime[:next_attempt_at].to_fs(:short) : "-"
+          %td
+            .buttonSet
+              = button_to "Retry now",
+                          admin_retry_rest_queue_path,
+                          method: :post,
+                          class: "button button--small button--dark",
+                          data: { confirm: "Make every unlocked delayed Rest message eligible for the next worker run?" }
+              = link_to "Debug", admin_debug_rest_queue_path, class: "button button--small"
+              = button_to "Refresh assignments",
+                          admin_refresh_queue_assignments_path(after_id: @reclassify_after),
+                          method: :post,
+                          class: "button button--small button--dark",
+                          data: { confirm: "Resolve current recipient MX records and reclassify up to 1,000 pending messages?" }
 
   .u-margin#queue-configurations
     %h2.pageContent__subTitle Queue configurations

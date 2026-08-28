@@ -1,0 +1,181 @@
+- page_title << "Admin"
+- page_title << "Rest queue debug"
+
+.pageHeader
+  %h1.pageHeader__title Rest queue debug
+
+.pageContent
+  %p.pageContent__intro.u-margin
+    Rest contains messages without a known virtual queue. They are still dispatched fairly by recipient domain or batch key.
+
+  .buttonSet.u-margin
+    = link_to "Back to queues", admin_queues_path(anchor: "rest-queue"), class: "button button--small"
+    = button_to "Retry Rest now",
+                admin_retry_rest_queue_path,
+                method: :post,
+                class: "button button--small button--dark",
+                data: { confirm: "Make every unlocked delayed Rest message eligible for the next worker run?" }
+    = button_to "Refresh queue assignments",
+                admin_refresh_queue_assignments_path,
+                method: :post,
+                class: "button button--small button--dark",
+                data: { confirm: "Resolve current recipient MX records and reclassify up to 1,000 pending messages?" }
+
+  %dl.adminStats.u-margin
+    .adminStats__stat
+      %dt Total
+      %dd= number_with_delimiter(@rest_runtime[:total])
+    .adminStats__stat
+      %dt Ready
+      %dd= number_with_delimiter(@rest_runtime[:ready])
+    .adminStats__stat
+      %dt Scheduled
+      %dd= number_with_delimiter(@rest_runtime[:scheduled])
+    .adminStats__stat
+      %dt Locked
+      %dd= number_with_delimiter(@rest_runtime[:locked])
+    .adminStats__stat
+      %dt Unassigned
+      %dd= number_with_delimiter(@rest_unassigned_count)
+
+  - if @rest_domain_debug
+    .u-margin
+      %h2.pageContent__subTitle= "Domain diagnostic: #{@rest_domain_debug[:domain]}"
+      - if @rest_domain_debug[:error]
+        %p.u-red.u-bold= @rest_domain_debug[:error]
+      - else
+        %table.dataTable.u-margin-half
+          %tbody
+            %tr
+              %td Domain macro result
+              %td= @rest_domain_debug[:macro_queue].presence || "-"
+            %tr
+              %td Resolved virtual queue
+              %td= @rest_domain_debug[:resolved_queue].presence || "(none — valid Rest/domain scheduling)"
+            %tr
+              %td Enabled queue configuration
+              %td= @rest_domain_debug[:queue_enabled] ? "Yes" : "No"
+        - if @rest_domain_debug[:queue_enabled]
+          %p.pageContent__text
+            This domain now resolves to an enabled queue. Use “Refresh queue assignments” to move its existing unlocked backlog out of Rest.
+        - elsif @rest_domain_debug[:resolved_queue].present?
+          %p.pageContent__text
+            A rollup or macro matched, but its queue configuration is not enabled. The message remains in Rest until that configuration is enabled.
+        - else
+          %p.pageContent__text
+            No rollup or macro matched. Keeping this domain in Rest is expected; it is scheduled independently by recipient domain.
+        %h3.pageContent__subTitle MX resolution
+        - if @rest_domain_debug[:mx_matches].empty?
+          %p.pageContent__text No MX record was returned; Postal will fall back to the recipient domain.
+        - else
+          %table.dataTable.u-margin-half
+            %thead
+              %tr
+                %td Priority
+                %td MX hostname
+                %td Matching rollup
+            %tbody
+              - @rest_domain_debug[:mx_matches].each do |record|
+                %tr
+                  %td= record[:priority]
+                  %td= record[:hostname]
+                  %td= record[:queue_name].presence || "-"
+
+  .u-margin
+    %h2.pageContent__subTitle Stored unknown virtual queues
+    - if @rest_unknown_queues.empty?
+      %p.pageContent__text No Rest message references an unknown virtual queue.
+    - else
+      %table.dataTable.u-margin-half
+        %thead
+          %tr
+            %td Stored virtual queue
+            %td Messages
+        %tbody
+          - @rest_unknown_queues.each do |queue_name, count|
+            %tr
+              %td= queue_name
+              %td= number_with_delimiter(count)
+
+  .u-margin
+    %h2.pageContent__subTitle Top recipient domains
+    - if @rest_domains.empty?
+      %p.pageContent__text Rest is empty.
+    - else
+      %table.dataTable.u-margin-half
+        %thead
+          %tr
+            %td Domain
+            %td Total
+            %td Ready
+            %td Scheduled
+            %td Locked
+            %td Next attempt
+            %td Action
+        %tbody
+          - @rest_domains.each do |runtime|
+            %tr
+              %td= runtime[:domain].presence || "(none)"
+              %td= number_with_delimiter(runtime[:total])
+              %td= number_with_delimiter(runtime[:ready])
+              %td= number_with_delimiter(runtime[:scheduled])
+              %td= number_with_delimiter(runtime[:locked])
+              %td= runtime[:next_attempt_at] ? runtime[:next_attempt_at].to_fs(:short) : "-"
+              %td
+                - if runtime[:domain].present?
+                  = link_to "Debug domain",
+                            admin_debug_rest_queue_path(domain: runtime[:domain]),
+                            class: "button button--small"
+                - else
+                  = "-"
+
+  .u-margin
+    %h2.pageContent__subTitle Oldest Rest messages
+    - if @rest_messages.empty?
+      %p.pageContent__text Rest is empty.
+    - else
+      %table.dataTable.u-margin-half
+        %thead
+          %tr
+            %td Message
+            %td Domain
+            %td Stored queue
+            %td Scheduler key
+            %td Status
+            %td Attempts
+            %td Created
+            %td Diagnostic
+        %tbody
+          - @rest_messages.each do |message|
+            - diagnostic = @rest_message_diagnostics.fetch(message)
+            - state = diagnostic[:state]
+            %tr
+              %td
+                - if message.server && message.server.organization
+                  = link_to "##{message.message_id}",
+                            organization_server_message_path(message.server.organization, message.server, message.message_id),
+                            class: "u-link"
+                - else
+                  = "##{message.message_id}"
+              %td= message.domain.presence || "-"
+              %td= message.virtual_queue.presence || "(blank)"
+              %td= diagnostic[:queue_key]
+              %td
+                - if message.locked_at
+                  = "Locked by #{message.locked_by}"
+                - elsif message.retry_after && message.retry_after >= 30.seconds.ago
+                  = "Scheduled #{message.retry_after.to_fs(:short)}"
+                - else
+                  = "Ready"
+              %td= message.attempts
+              %td= message.created_at ? message.created_at.to_fs(:short) : "-"
+              %td
+                = diagnostic[:reason]
+                - if state&.next_attempt_at
+                  %br
+                  = "Queue deferred until #{state.next_attempt_at.to_fs(:short)}."
+                - if state&.last_error.present?
+                  %br
+                  = truncate(state.last_error, length: 240)
+
+      = paginate @rest_messages

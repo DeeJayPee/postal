@@ -166,6 +166,70 @@ RSpec.describe AdminQueuesController, type: :controller do
     end
   end
 
+  describe "POST retry_rest" do
+    it "makes delayed Rest messages and their scheduler state eligible" do
+      QueueConfiguration.create!(queue_name: "known.queue")
+      scheduled = create(
+        :queued_message,
+        virtual_queue: nil,
+        domain: "rest.example",
+        batch_key: "outgoing-rest.example",
+        retry_after: 1.hour.from_now
+      )
+      known = create(:queued_message, virtual_queue: "known.queue", retry_after: 1.hour.from_now)
+      locked = create(
+        :queued_message,
+        :locked,
+        virtual_queue: nil,
+        domain: "locked.example",
+        batch_key: "outgoing-locked.example",
+        retry_after: 1.hour.from_now
+      )
+      state = SMTPQueueState.for_message!(scheduled)
+      state.update!(next_attempt_at: 1.hour.from_now, consecutive_failures: 1)
+
+      post :retry_rest
+
+      expect(response).to redirect_to(admin_queues_path(anchor: "rest-queue"))
+      expect(scheduled.reload.retry_after).to be_nil
+      expect(known.reload.retry_after).to be_present
+      expect(locked.reload.retry_after).to be_present
+      expect(state.reload).to have_attributes(next_attempt_at: nil, consecutive_failures: 0)
+    end
+  end
+
+  describe "GET debug_rest" do
+    it "shows only messages outside known virtual queues" do
+      QueueConfiguration.create!(queue_name: "known.queue")
+      rest = create(:queued_message, virtual_queue: nil, domain: "rest.example")
+      create(:queued_message, virtual_queue: "known.queue", domain: "known.example")
+
+      get :debug_rest
+
+      expect(response).to have_http_status(:ok)
+      expect(controller.instance_variable_get(:@rest_messages)).to contain_exactly(rest)
+      expect(controller.instance_variable_get(:@rest_domains).first).to include(domain: "rest.example", total: 1)
+    end
+
+    it "resolves one selected Rest domain without changing its assignment" do
+      queue = QueueConfiguration.create!(queue_name: "resolved.queue")
+      MXRollup.create!(mx_hostname: "mx.rest.example", rollup_name: queue.queue_name)
+      rest = create(:queued_message, virtual_queue: nil, domain: "rest.example")
+      resolver = instance_double(DNSResolver, mx: [[10, "mx.rest.example"]])
+      allow(DNSResolver).to receive(:local).and_return(resolver)
+
+      get :debug_rest, params: { domain: rest.domain }
+
+      expect(response).to have_http_status(:ok)
+      expect(controller.instance_variable_get(:@rest_domain_debug)).to include(
+        domain: "rest.example",
+        resolved_queue: "resolved.queue",
+        queue_enabled: true
+      )
+      expect(rest.reload.virtual_queue).to be_nil
+    end
+  end
+
   describe "POST smtp_probe" do
     it "returns a backoff queue to normal after a successful real delivery" do
       queue = QueueConfiguration.create!(queue_name: "example.queue", mode: "backoff")

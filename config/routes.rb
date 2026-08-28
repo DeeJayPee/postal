@@ -92,6 +92,8 @@ Rails.application.routes.draw do
   post "admin/queues/rollup" => "admin_queues#create_rollup", as: :admin_create_rollup
   post "admin/queues/smtp_probe" => "admin_queues#smtp_probe", as: :admin_smtp_probe
   post "admin/queues/retry" => "admin_queues#retry_queue", as: :admin_retry_queue
+  post "admin/queues/rest/retry" => "admin_queues#retry_rest", as: :admin_retry_rest_queue
+  get "admin/queues/rest/debug" => "admin_queues#debug_rest", as: :admin_debug_rest_queue
   post "admin/queues/refresh_assignments" => "admin_queues#refresh_queue_assignments", as: :admin_refresh_queue_assignments
   get "admin/queues/configurations/:id/edit" => "admin_queues#edit_queue", as: :admin_edit_queue
   patch "admin/queues/configurations/:id" => "admin_queues#update_queue", as: :admin_update_queue
